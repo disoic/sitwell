@@ -1,1 +1,102 @@
+# Builds Sitwell's spot files from OpenStreetMap twice a month and publishes the site
+# (the app plus the spot files) to the "site" branch, which GitHub Pages serves.
+#
+# - On the 1st and 15th of each month, and when started by hand: fresh OpenStreetMap data, full rebuild.
+# - On every push to main: the app is redeployed with the spot files already published.
+# Unchanged squares come out byte-identical, so each publish only uploads what changed,
+# and the site branch keeps a single commit instead of growing.
+name: Site
 
+on:
+  schedule:
+    - cron: '17 2 1,15 * *'
+  workflow_dispatch:
+    inputs:
+      rebuild:
+        description: Rebuild the spot files from fresh OpenStreetMap data
+        type: boolean
+        default: true
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: site
+  cancel-in-progress: false
+
+jobs:
+  site:
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Check the shared core and the app's logic
+        run: node pipeline/test/check-core.js && node test/check-present.js
+
+      - name: Fetch the published site
+        run: |
+          mkdir -p previous
+          if git fetch --depth=1 origin site; then
+            git archive FETCH_HEAD | tar -x -C previous
+          else
+            echo "No site branch yet: this is the first build."
+          fi
+
+      - name: Decide whether to rebuild the spot files
+        id: mode
+        env:
+          EVENT: ${{ github.event_name }}
+          REBUILD: ${{ inputs.rebuild }}
+        run: |
+          if [ "$EVENT" = schedule ] || [ "$REBUILD" = true ] || [ ! -f previous/data/v1/coverage.json ]; then
+            echo "rebuild=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "rebuild=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install osmium
+        if: steps.mode.outputs.rebuild == 'true'
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq osmium-tool
+
+      - name: Download and reduce the OpenStreetMap extracts
+        if: steps.mode.outputs.rebuild == 'true'
+        run: bash pipeline/prepare.sh
+
+      - name: Build the spot files
+        if: steps.mode.outputs.rebuild == 'true'
+        run: node --max-old-space-size=8192 pipeline/build.js --work work --out site/data --prev previous/data
+
+      - name: Keep the published spot files
+        if: steps.mode.outputs.rebuild != 'true'
+        run: mkdir -p site && cp -r previous/data site/data
+
+      - name: Add the app
+        run: |
+          cp -r app/. site/
+          cp core/core.js site/core.js
+          if [ -f CNAME ]; then cp CNAME site/CNAME; fi
+          touch site/.nojekyll
+
+      - name: Publish to the site branch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          export GIT_INDEX_FILE="$RUNNER_TEMP/site-index"
+          git --work-tree=site add -A
+          tree=$(git write-tree)
+          unset GIT_INDEX_FILE
+          commit=$(git commit-tree "$tree" -m "Site from ${GITHUB_SHA::7}, $(date -u +%Y-%m-%d)")
+          git push -f origin "$commit:refs/heads/site"
+
+      - name: Summary
+        if: steps.mode.outputs.rebuild == 'true'
+        run: |
+          node pipeline/summary.js site/data >> "$GITHUB_STEP_SUMMARY"
+          node test/check-present.js site/data
