@@ -1,0 +1,7 @@
+{
+  "attributes": {},
+  "linear_tags": ["highway", "railway", "waterway", "natural=coastline", "natural=tree_row", "amenity=bench", "leisure=picnic_table"],
+  "area_tags": ["natural=water", "natural=wood", "natural=beach", "landuse", "leisure", "amenity", "boundary", "historic", "tourism", "man_made", "shop", "building", "highway=pedestrian"],
+  "exclude_tags": [],
+  "include_tags": []
+}

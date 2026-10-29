@@ -1,0 +1,7 @@
+{
+  "regions": [
+    { "code": "UT", "name": "Utrecht (test extract, 2015)", "bbox": [52.056, 5.031, 52.132, 5.148] },
+    { "code": "MC", "name": "Monaco (test extract, 2021)", "bbox": [43.72, 7.40, 43.76, 7.45] },
+    { "code": "LI", "name": "Liechtenstein (test extract, 2013)", "iso": "LI" }
+  ]
+}

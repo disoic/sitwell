@@ -1,0 +1,37 @@
+# What Sitwell keeps from OpenStreetMap (osmium tags-filter expressions).
+# Named footpaths are added in a second pass by reduce.sh, because they need two conditions.
+
+# Places to sit, and toilets
+n/amenity=bench
+w/amenity=bench
+n/leisure=picnic_table
+w/leisure=picnic_table
+nwr/amenity=toilets
+
+# Points of interest around them
+nwr/amenity=drinking_water,fountain,bicycle_parking,shelter,place_of_worship,bbq,cafe,ice_cream
+nwr/man_made=water_tap
+nwr/shop=bakery,supermarket,convenience,kiosk
+nwr/tourism=viewpoint,attraction,museum,artwork
+nwr/historic=castle,monument,ruins,city_gate,fort,tower,manor,church
+nwr/leisure=firepit,playground,bathing_place,swimming_area
+n/highway=bus_stop
+n/railway=tram_stop
+n/public_transport=platform
+n/natural=tree
+n/amenity=waste_basket
+
+# Lines: roads by class, railways, waterways, tree rows, coastline
+w/highway=motorway,trunk,primary,secondary,tertiary,motorway_link,trunk_link,primary_link,secondary_link,tertiary_link
+w/railway=rail,light_rail,narrow_gauge,tram
+w/waterway=river,canal,stream
+w/natural=tree_row,coastline
+
+# Areas: open water, parks, gardens, cemeteries, woods, beaches
+wr/natural=water,wood,beach
+wr/leisure=park,garden
+wr/landuse=cemetery,forest
+wr/amenity=grave_yard
+
+# Boundaries, for the passport
+r/boundary=administrative

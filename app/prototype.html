@@ -1,0 +1,3876 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Sitwell: find a lovely spot to linger</title>
+<meta name="description" content="Sitwell: find a lovely spot to linger. Benches, picnic tables and toilets nearby, described by what's around them and rated by people who sat there.">
+<meta name="theme-color" content="#F6F4EF">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%232F5E43'/><rect x='18' y='34' width='64' height='9' rx='3' fill='%23F6F4EF'/><rect x='18' y='48' width='64' height='9' rx='3' fill='%23F6F4EF'/><rect x='14' y='61' width='72' height='8' rx='3' fill='%23F6F4EF'/><rect x='22' y='69' width='7' height='17' rx='2' fill='%23F6F4EF'/><rect x='71' y='69' width='7' height='17' rx='2' fill='%23F6F4EF'/></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Serif:wght@400;500&display=swap">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<style>
+:root {
+  --paper: #F6F4EF;
+  --surface: #FFFFFF;
+  --ink: #23211D;
+  --ink-2: #5E5950;
+  --ink-3: #8C867B;
+  --line: #E2DDD3;
+  --bench: #2F5E43;
+  --table: #A0672E;
+  --toilet: #2F6496;
+  --like: #C4476A;
+  --gold: #B8860B;
+  --warn: #B07A2A;
+  --serif: "IBM Plex Serif", Georgia, "Times New Roman", serif;
+  --sans: "IBM Plex Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  color-scheme: light;
+  box-sizing: border-box;
+  padding-top: env(safe-area-inset-top, 0px);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --paper: #191816;
+    --surface: #23211E;
+    --ink: #ECE8E0;
+    --ink-2: #B7B1A6;
+    --ink-3: #8A8479;
+    --line: #35322D;
+    --bench: #86BB98;
+    --table: #D6A36D;
+    --toilet: #8AB4DE;
+    --like: #E68AA3;
+    --gold: #E6BC55;
+    --warn: #D9A65A;
+    color-scheme: dark;
+  }
+  .leaflet-tile-pane { filter: brightness(.78) contrast(1.08) saturate(.85); }
+}
+*, *::before, *::after { box-sizing: inherit; }
+html, body { height: 100%; }
+body {
+  margin: 0;
+  overflow: hidden;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: 15px;
+  line-height: 1.45;
+  -webkit-text-size-adjust: 100%;
+}
+button { font: inherit; color: inherit; cursor: pointer; }
+[hidden] { display: none !important; }
+:focus-visible { outline: 2px solid var(--bench); outline-offset: 2px; }
+
+.app { position: relative; height: 100%; display: flex; flex-direction: column; }
+
+/* Header */
+.top { flex: none; padding: 10px 16px 9px; border-bottom: 1px solid var(--line); }
+.top h1 { margin: 0; font-family: var(--serif); font-weight: 500; font-size: 22px; line-height: 1.1; letter-spacing: -0.01em; }
+.tagline { display: none; margin: 6px 0 0; color: var(--ink-2); font-size: 14px; max-width: 44ch; }
+
+/* Map */
+.mapwrap { position: relative; flex: 1; min-height: 0; }
+#map { position: absolute; inset: 0; background: var(--line); }
+.leaflet-container { font-family: var(--sans); }
+.mapbtns { position: absolute; z-index: 500; left: 12px; top: 12px; display: flex; flex-wrap: wrap; gap: 8px; }
+.pill {
+  font-weight: 500;
+  font-size: 14px;
+  line-height: 1;
+  padding: 11px 15px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, .12);
+}
+.pill.strong { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+.pill:disabled { opacity: .55; cursor: default; }
+
+/* Panel: a bottom sheet on phones, a sidebar on wide screens */
+.panel {
+  position: absolute;
+  z-index: 600;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  max-height: 72%;
+  background: var(--surface);
+  border-radius: 18px 18px 0 0;
+  box-shadow: 0 -4px 18px rgba(0, 0, 0, .14);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+.panel::before { content: ""; flex: none; width: 36px; height: 4px; margin: 8px auto 0; border-radius: 2px; background: var(--line); }
+.panel-bar { flex: none; display: flex; align-items: center; gap: 12px; padding: 6px 16px 8px; }
+.status { flex: 1; margin: 0; color: var(--ink-2); font-size: 13.5px; }
+.link-btn { flex: none; border: 0; background: none; padding: 8px 2px; font-weight: 600; font-size: 14px; color: var(--bench); }
+.filters { flex: none; display: flex; gap: 8px; overflow-x: auto; padding: 0 16px 12px; scrollbar-width: none; }
+.filters::-webkit-scrollbar { display: none; }
+.sep { flex: none; width: 1px; margin: 4px 2px; background: var(--line); }
+.chip {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  white-space: nowrap;
+  font-weight: 500;
+  font-size: 14px;
+  line-height: 1;
+  padding: 9px 13px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--ink-2);
+}
+.chip .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--c); }
+.chip.type[aria-pressed="true"] { background: var(--paper); border-color: var(--ink-3); color: var(--ink); }
+.chip.type[aria-pressed="false"] { color: var(--ink-3); }
+.chip.type[aria-pressed="false"] .dot { background: transparent; box-shadow: inset 0 0 0 1.5px var(--c); }
+.chip.need[aria-pressed="true"] { background: var(--ink); border-color: var(--ink); color: var(--paper); }
+.count { color: var(--ink-3); font-weight: 400; font-variant-numeric: tabular-nums; }
+.panel-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; border-top: 1px solid var(--line); }
+.panel[data-mode="peek"] .panel-body { display: none; }
+
+/* List */
+.list { list-style: none; margin: 0; padding: 0; }
+.spot { border-bottom: 1px solid var(--line); }
+.spot-head {
+  display: grid;
+  grid-template-columns: 10px 1fr auto;
+  gap: 0 14px;
+  width: 100%;
+  padding: 15px 16px;
+  border: 0;
+  background: none;
+  text-align: left;
+}
+.spot-head:focus-visible { outline-offset: -2px; }
+.spot.disliked .spot-head { opacity: .55; }
+.dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: var(--c); }
+.spot-head .dot { margin-top: 8px; }
+.spot-body { display: block; min-width: 0; }
+.sentence { display: block; font-family: var(--serif); font-size: 17.5px; line-height: 1.4; color: var(--ink); }
+.comfort { display: block; margin-top: 3px; font-size: 14px; color: var(--ink-2); }
+.comfort.quiet { color: var(--ink-3); }
+.facts { display: flex; flex-wrap: wrap; gap: 4px 16px; margin-top: 9px; font-size: 13.5px; color: var(--ink); }
+.fact .d { color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.facts.warn { margin-top: 5px; color: var(--ink-3); }
+.facts.warn .d { color: var(--ink-3); }
+.facts.warn .fact::before {
+  content: "";
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-right: 6px;
+  border-radius: 50%;
+  background: var(--warn);
+  vertical-align: 2px;
+}
+.dist { padding-top: 3px; font-size: 14px; color: var(--ink-2); font-variant-numeric: tabular-nums; white-space: nowrap; text-align: right; }
+.liked { display: block; margin-top: 4px; color: var(--like); font-size: 12.5px; font-weight: 500; }
+.more { display: block; margin: 14px 16px 4px; }
+.note { margin: 0; padding: 14px 16px 20px; color: var(--ink-3); font-size: 12.5px; max-width: 60ch; }
+.note a { color: inherit; }
+.message { padding: 16px; color: var(--ink-2); font-size: 14.5px; }
+.message p { margin: 0 0 12px; max-width: 52ch; }
+.message .detail-line { font-size: 12.5px; color: var(--ink-3); overflow-wrap: anywhere; }
+
+/* Detail */
+.detail { padding: 4px 16px 20px; }
+.detail-nav { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.detail-nav .dist { padding: 0; }
+.kind { display: flex; align-items: center; gap: 8px; margin: 8px 0 4px; font-size: 13.5px; color: var(--ink-2); }
+.sentence.big { font-size: 21px; line-height: 1.35; }
+.votes { display: flex; gap: 8px; margin-top: 18px; }
+.vote {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 12px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: var(--paper);
+  font-weight: 500;
+}
+.vote svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.vote.like[aria-pressed="true"] { background: var(--like); border-color: var(--like); color: var(--paper); }
+.vote.like[aria-pressed="true"] svg { fill: currentColor; }
+.vote.dislike[aria-pressed="true"] { background: var(--ink-2); border-color: var(--ink-2); color: var(--paper); }
+.fine { margin: 8px 0 0; font-size: 12.5px; color: var(--ink-3); }
+.actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 18px; }
+.actions a {
+  font-weight: 500;
+  font-size: 14px;
+  line-height: 1;
+  padding: 10px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--paper);
+  color: var(--ink);
+  text-decoration: none;
+}
+.actions .go { background: var(--bench); border-color: var(--bench); color: var(--paper); }
+.measured-box { margin-top: 18px; }
+.measured-box summary { cursor: pointer; padding: 6px 0; font-size: 13.5px; color: var(--ink-2); }
+.measured { display: grid; grid-template-columns: max-content 1fr; gap: 3px 16px; margin: 6px 0 0; font-size: 13px; }
+.measured dt { color: var(--ink-3); }
+.measured dd { margin: 0; color: var(--ink-2); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+
+/* Check-in and raccoon */
+.tag { display: block; margin-top: 4px; font-size: 12.5px; color: var(--ink-3); }
+.vote:disabled { opacity: .45; cursor: default; }
+.checkin { margin-top: 18px; padding: 14px; border-radius: 14px; background: var(--paper); border: 1px solid var(--line); }
+.checkin.rare { border-color: var(--gold); }
+.ck-lead { margin: 0; font-size: 14.5px; color: var(--ink); }
+.ck-emoji { font-size: 20px; vertical-align: -2px; margin-right: 4px; }
+.ck-btn {
+  margin-top: 10px;
+  width: 100%;
+  padding: 13px;
+  border: 0;
+  border-radius: 12px;
+  background: var(--ink);
+  color: var(--paper);
+  font-weight: 600;
+  font-size: 15px;
+}
+.ck-btn:disabled { opacity: .6; cursor: default; }
+.ck-msg { margin: 8px 0 0; font-size: 13px; color: var(--ink-2); }
+.reveal { display: flex; align-items: center; gap: 14px; }
+.reveal .snack {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  background: var(--surface);
+  font-size: 36px;
+  line-height: 1;
+  animation: pop .5s ease-out both;
+}
+.checkin.rare .reveal .snack { background: radial-gradient(circle, #FFF1C2 0%, #F2C94C 70%, var(--gold) 100%); }
+.reveal-text strong { display: block; font-family: var(--serif); font-weight: 500; font-size: 18px; line-height: 1.3; }
+.reveal-text span { display: block; margin-top: 2px; font-size: 13.5px; color: var(--ink-2); }
+@keyframes pop {
+  from { transform: scale(.4); opacity: 0; }
+  70% { transform: scale(1.12); opacity: 1; }
+  to { transform: scale(1); }
+}
+@media (prefers-reduced-motion: reduce) { .reveal .snack { animation: none; } }
+.raccoon-art { display: flex; justify-content: center; margin: 2px 0 4px; }
+.raccoon-art svg { width: 200px; height: auto; }
+.rc-head { display: flex; align-items: baseline; justify-content: center; gap: 10px; }
+.rc-name { margin: 0; font-family: var(--serif); font-weight: 500; font-size: 24px; }
+.rc-line { margin: 4px auto 0; max-width: 40ch; text-align: center; color: var(--ink); font-size: 14.5px; }
+.rc-line.quiet { color: var(--ink-2); font-size: 13.5px; }
+.rc-section { margin: 22px 0 4px; font-size: 13.5px; font-weight: 600; color: var(--ink-2); }
+.log { list-style: none; margin: 0 0 12px; padding: 0; }
+.log li { display: grid; grid-template-columns: 32px 1fr auto; gap: 10px; align-items: center; padding: 9px 0; border-bottom: 1px solid var(--line); }
+.log .em { font-size: 24px; text-align: center; }
+.log .what { font-size: 14px; min-width: 0; }
+.log .where { display: block; font-size: 12.5px; color: var(--ink-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.log .val { font-size: 13.5px; text-align: right; font-variant-numeric: tabular-nums; }
+.log .val small { display: block; font-size: 12px; color: var(--ink-3); }
+.log li.rare .what { color: var(--gold); font-weight: 600; }
+
+/* Adding a bench */
+.add-title { margin: 8px 0 4px; font-family: var(--serif); font-weight: 500; font-size: 21px; }
+.field-label { margin: 16px 0 6px; font-size: 13.5px; font-weight: 600; color: var(--ink-2); }
+.seg { display: flex; gap: 6px; }
+.segbtn {
+  flex: 1;
+  padding: 11px 8px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: var(--paper);
+  font-weight: 500;
+  font-size: 14px;
+}
+.segbtn[aria-pressed="true"] { background: var(--ink); border-color: var(--ink); color: var(--paper); }
+.add-title + .fine { margin-top: 2px; }
+.detail .ck-btn { margin-top: 18px; }
+.actions .plain, .actions button.go {
+  font-weight: 500;
+  font-size: 14px;
+  line-height: 1;
+  padding: 10px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--paper);
+}
+.actions button.go { background: var(--bench); border-color: var(--bench); color: var(--paper); }
+
+/* The draggable pin for a new bench */
+.drop-pin-wrap { background: none; border: 0; }
+.drop-pin {
+  width: 30px;
+  height: 30px;
+  border-radius: 50% 50% 50% 0;
+  transform: rotate(-45deg);
+  background: var(--c);
+  border: 3px solid var(--paper);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, .35);
+  cursor: grab;
+}
+.drop-pin::after {
+  content: "";
+  position: absolute;
+  inset: 8px;
+  border-radius: 50%;
+  background: var(--paper);
+}
+
+/* Bubbles for nearby spots when zoomed out */
+.bubble-wrap { background: none; border: 0; }
+.bubble {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  background: var(--ink);
+  color: var(--paper);
+  border: 2px solid var(--paper);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, .3);
+  font: 600 12.5px/1 var(--sans);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Raccoon panel: tabs, picker, wardrobe, passport */
+.tabs {
+  display: flex;
+  gap: 4px;
+  margin: 8px 0 6px;
+  padding: 3px;
+  border-radius: 12px;
+  background: var(--paper);
+  border: 1px solid var(--line);
+}
+.tab { flex: 1; padding: 9px 6px; border: 0; border-radius: 9px; background: transparent; font-weight: 500; font-size: 14px; color: var(--ink-2); }
+.tab[aria-selected="true"] { background: var(--surface); color: var(--ink); box-shadow: 0 1px 3px rgba(0, 0, 0, .12); }
+.raccoon-art.small svg { width: 150px; }
+.pick-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin-top: 14px; }
+.pick {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 8px 8px 12px;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  background: var(--paper);
+  text-align: center;
+}
+.pick svg { width: 100%; max-width: 132px; height: auto; }
+.pick[aria-pressed="true"] { background: var(--surface); border-color: var(--ink); box-shadow: inset 0 0 0 1.5px var(--ink); }
+.pick-name { font-family: var(--serif); font-size: 17px; font-weight: 500; color: var(--ink); }
+.pick-line { font-size: 12.5px; line-height: 1.35; color: var(--ink-2); }
+.tiles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.tile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 6px 10px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: var(--paper);
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--ink);
+  text-align: center;
+}
+.tile svg { width: 100%; height: auto; }
+.tile[aria-pressed="true"] { background: var(--surface); border-color: var(--bench); box-shadow: inset 0 0 0 1.5px var(--bench); }
+.tile.locked { justify-content: center; min-height: 88px; border-style: dashed; color: var(--ink-3); font-weight: 400; }
+.tile .q { font-family: var(--serif); font-size: 26px; line-height: 1; }
+/* Stamps sit on paper in both light and dark mode, like a real passport page. */
+.stamps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; padding: 8px; border-radius: 12px; background: #FBF8F1; }
+.stamp svg { display: block; width: 100%; height: auto; }
+.passport-intro { margin-top: 10px; text-align: left; max-width: none; }
+.found { margin: 10px 0 0; font-size: 14px; color: var(--ink); }
+.found .link-btn { padding: 0 2px; }
+
+.voted-switch { margin-top: 12px; }
+.list.voted { margin: 0 -16px; border-top: 1px solid var(--line); }
+.tab { font-size: 13.5px; }
+
+/* Ratings */
+.rate-q { font-family: var(--serif); font-size: 18px; }
+.rate-row { display: flex; gap: 6px; margin-top: 10px; }
+.ratebtn {
+  flex: 1;
+  padding: 13px 6px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  font-weight: 600;
+  font-size: 15px;
+}
+.rate-row.small .ratebtn { padding: 10px 6px; font-size: 14px; font-weight: 500; background: var(--paper); }
+.ratebtn.lovely[aria-pressed="true"] { background: var(--like); border-color: var(--like); color: var(--paper); }
+.ratebtn.okay[aria-pressed="true"] { background: var(--ink-2); border-color: var(--ink-2); color: var(--paper); }
+.ratebtn.notgreat[aria-pressed="true"] { background: var(--warn); border-color: var(--warn); color: var(--paper); }
+.rerate { margin-top: 14px; }
+.rerate .field-label { margin-top: 0; }
+.tag.lovely { color: var(--like); font-weight: 600; }
+.tag.notgreat { color: var(--warn); }
+.actions.reset { margin-top: 22px; }
+
+.rate-row.four { flex-wrap: wrap; }
+.rate-row.four .ratebtn { flex: 1 1 40%; }
+.ratebtn.clean[aria-pressed="true"] { background: var(--bench); border-color: var(--bench); color: var(--paper); }
+.ratebtn.avoid[aria-pressed="true"] { background: var(--warn); border-color: var(--warn); color: var(--paper); }
+.ratebtn.closed[aria-pressed="true"] { background: var(--ink); border-color: var(--ink); color: var(--paper); }
+.tag.clean { color: var(--bench); font-weight: 600; }
+.tag.avoid, .tag.closed { color: var(--warn); }
+
+/* Star ratings */
+.stars { display: flex; gap: 4px; margin-top: 10px; }
+.star {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  padding: 8px 2px 9px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+}
+.star .glyph { font-size: 28px; line-height: 1; color: var(--line); }
+.star.on .glyph { color: #E0A526; }
+.star .word { font-size: 11px; line-height: 1.2; text-align: center; color: var(--ink-2); }
+.star[aria-pressed="true"] { border-color: #E0A526; box-shadow: inset 0 0 0 1.5px #E0A526; }
+.stars.small .star { padding: 6px 2px 7px; background: var(--paper); }
+.stars.small .glyph { font-size: 22px; }
+.closedbtn {
+  width: 100%;
+  margin-top: 6px;
+  padding: 10px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: var(--paper);
+  font-weight: 500;
+  font-size: 14px;
+}
+.closedbtn[aria-pressed="true"] { background: var(--ink); border-color: var(--ink); color: var(--paper); }
+.tag.nice { color: var(--bench); font-weight: 600; }
+.tag.low { color: var(--warn); }
+
+/* Sorting, promising spots, tags */
+.sorter { margin: 12px 16px; }
+.tag.promising { color: #A87A10; font-weight: 600; }
+.promise-line { margin: 8px 0 0; font-size: 14px; color: #8A6A1E; }
+@media (prefers-color-scheme: dark) { .tag.promising, .promise-line { color: var(--gold); } }
+.tagchips { display: flex; flex-wrap: wrap; gap: 6px; }
+
+/* The raccoon's voice */
+.bubble-line { display: flex; align-items: flex-start; gap: 10px; margin: 12px 0 4px; }
+.bubble-face { flex: none; width: 44px; height: 44px; border-radius: 50%; background: var(--paper); border: 1px solid var(--line); overflow: hidden; }
+.bubble-face svg { display: block; width: 100%; height: 100%; }
+.speech {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 4px 14px 14px 14px;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  font-family: var(--serif);
+  font-size: 15.5px;
+  line-height: 1.4;
+  color: var(--ink);
+}
+.checkin .speech { background: var(--surface); }
+
+/* Neighbourhood progress in the passport */
+.progress { margin: 0 0 10px; }
+.progress-row { display: flex; flex-direction: column; gap: 4px; margin: 0 0 8px; font-size: 13.5px; color: var(--ink-2); }
+.bar { display: block; height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; }
+.bar span { display: block; height: 100%; background: var(--bench); }
+.actions.reset { gap: 8px; }
+
+/* First-open intro */
+.intro { position: fixed; inset: 0; z-index: 2000; display: grid; place-items: center; padding: 20px; background: rgba(20, 18, 15, .45); }
+.intro-card {
+  width: min(420px, 100%);
+  padding: 22px 20px 18px;
+  border-radius: 20px;
+  background: var(--surface);
+  box-shadow: 0 10px 40px rgba(0, 0, 0, .25);
+  text-align: center;
+}
+.intro-art svg { width: 100%; max-width: 250px; height: auto; }
+.intro-title { margin: 8px 0 6px; font-family: var(--serif); font-weight: 500; font-size: 24px; }
+.intro-text { margin: 0; color: var(--ink-2); font-size: 15px; }
+.intro-dots { display: flex; justify-content: center; gap: 6px; margin: 16px 0 10px; }
+.intro-dots span { width: 7px; height: 7px; border-radius: 50%; background: var(--line); }
+.intro-dots span.on { background: var(--ink); }
+.intro-actions { display: flex; align-items: center; gap: 12px; }
+.intro-actions .ck-btn { flex: 1; margin-top: 0; }
+
+/* Calm mode, the companion offer and settings */
+.reveal .snack.calm { color: #E0A526; font-size: 34px; }
+.offer { margin-top: 14px; padding: 14px; border-radius: 12px; background: var(--surface); border: 1px dashed var(--ink-3); }
+.offer-title { margin: 0 0 4px; font-family: var(--serif); font-size: 18px; }
+.offer .actions { margin-top: 12px; }
+.settings { margin-top: 26px; padding-top: 4px; border-top: 1px solid var(--line); }
+.setting-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 14.5px; }
+.toggle {
+  min-width: 64px;
+  padding: 8px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--paper);
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--ink-2);
+}
+.toggle[aria-pressed="true"] { background: var(--bench); border-color: var(--bench); color: var(--paper); }
+
+/* Sunset soon */
+.sunset-banner {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 16px 10px;
+  padding: 9px 10px 9px 12px;
+  border-radius: 12px;
+  background: linear-gradient(90deg, #FBE3C0, #F6CDBF);
+  color: #5A3A22;
+  font-size: 14px;
+}
+.sunset-banner .sun { font-size: 18px; color: #D9822B; }
+.sunset-text { flex: 1; }
+.sunset-go { border: 0; border-radius: 999px; padding: 7px 12px; background: #5A3A22; color: #FBE3C0; font-weight: 600; font-size: 13.5px; }
+.sunset-x { border: 0; background: none; color: #5A3A22; font-size: 20px; line-height: 1; padding: 2px 4px; }
+.sunset-line { color: #A8612A; }
+@media (prefers-color-scheme: dark) {
+  .sunset-banner { background: linear-gradient(90deg, #4A3420, #4A2A26); color: #F6D8B8; }
+  .sunset-go { background: #F6D8B8; color: #3A2616; }
+  .sunset-x { color: #F6D8B8; }
+  .sunset-line { color: #E3A06A; }
+}
+
+/* Wide screens: sidebar on the left, map fills the rest */
+@media (min-width: 900px) {
+  .app { display: grid; grid-template-columns: 440px 1fr; grid-template-rows: auto 1fr; }
+  .top { grid-column: 1; grid-row: 1; padding: 18px 20px 14px; border-right: 1px solid var(--line); }
+  .top h1 { font-size: 28px; }
+  .tagline { display: block; }
+  .mapwrap { grid-column: 2; grid-row: 1 / span 2; }
+  .panel {
+    position: static;
+    grid-column: 1;
+    grid-row: 2;
+    min-height: 0;
+    max-height: none;
+    border-radius: 0;
+    box-shadow: none;
+    border-right: 1px solid var(--line);
+    padding-bottom: 0;
+  }
+  .panel::before { display: none; }
+  .panel-bar { padding: 12px 20px 8px; }
+  #panelToggle { display: none; }
+  .filters { flex-wrap: wrap; overflow: visible; padding: 0 20px 12px; }
+  .sunset-banner { margin: 0 20px 10px; }
+  .panel[data-mode="peek"] .panel-body { display: block; }
+  .spot-head { padding: 16px 20px; }
+  .detail { padding: 8px 20px 24px; }
+  .sorter { margin: 12px 20px; }
+  .message { padding: 18px 20px; }
+}
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="top">
+    <h1>Sitwell</h1>
+    <p class="tagline">Find a lovely spot to linger.</p>
+  </header>
+
+  <div class="mapwrap">
+    <div id="map" role="region" aria-label="Map of benches, picnic tables and toilets"></div>
+    <div class="mapbtns">
+      <button id="locate" class="pill" type="button">Locate me</button>
+      <button id="addBtn" class="pill" type="button">Add a bench</button>
+      <button id="raccoonBtn" class="pill" type="button" aria-label="Your rated spots and passport">My spots</button>
+      <button id="searchHere" class="pill strong" type="button" hidden>Search this area</button>
+    </div>
+  </div>
+
+  <aside id="panel" class="panel" data-mode="peek" aria-label="Spots">
+    <div class="panel-bar">
+      <p id="status" class="status" aria-live="polite"></p>
+      <button id="panelToggle" class="link-btn" type="button">Show list</button>
+    </div>
+    <div id="sunsetBanner" class="sunset-banner" role="status" hidden></div>
+    <div class="filters" role="group" aria-label="Filters">
+      <button class="chip type" type="button" data-type="bench" aria-pressed="true" style="--c: var(--bench)"><span class="dot" aria-hidden="true"></span>Benches <span class="count"></span></button>
+      <button class="chip type" type="button" data-type="table" aria-pressed="true" style="--c: var(--table)"><span class="dot" aria-hidden="true"></span>Picnic tables <span class="count"></span></button>
+      <button class="chip type" type="button" data-type="toilet" aria-pressed="true" style="--c: var(--toilet)"><span class="dot" aria-hidden="true"></span>Toilets <span class="count"></span></button>
+      <span class="sep" aria-hidden="true"></span>
+      <button class="chip need" type="button" data-need="liked" aria-pressed="false">Lovely</button>
+      <button class="chip need" type="button" data-need="nice" aria-pressed="false">Nice</button>
+      <button class="chip need" type="button" data-need="sunset" aria-pressed="false">Sunset</button>
+      <button class="chip need" type="button" data-need="visited" aria-pressed="false">Visited</button>
+      <button class="chip need" type="button" data-need="water" aria-pressed="false">By water</button>
+      <button class="chip need" type="button" data-need="green" aria-pressed="false">Park or woods</button>
+      <button class="chip need" type="button" data-need="quiet" aria-pressed="false">Away from traffic</button>
+    </div>
+    <div id="panelBody" class="panel-body"></div>
+  </aside>
+</div>
+<div id="intro" class="intro" hidden></div>
+
+<script id="core">
+/* ============================================================
+   Core: query building, geometry and the surroundings summary.
+   No DOM access here, so it can be tested on its own.
+   ============================================================ */
+
+// Thresholds in metres. Tune these against benches you know.
+const RULES = {
+  lake: 40,           // "lakeside"
+  river: 30,          // "riverside"
+  stream: 20,         // "by a stream"
+  promenade: 15,      // "on a promenade" (named footpath or pedestrian street)
+  pond: 40,           // "by a pond" / "by the water"
+  forestEdge: 20,     // "at the forest edge"
+  view: 50,           // "with a view" (mapped viewpoint)
+  landmark: 60,       // "near Grossmünster" (named landmark)
+  sunsetFrom: 225,    // nearest lake or river lies between these compass directions,
+  sunsetTo: 315,      // so looking at the water means looking at the sunset
+  shadeRadius: 12,    // trees counted within this radius...
+  shadeTrees: 2,      // ...need at least this many for "likely shaded"
+  shelter: 6,         // "roofed" if a shelter is this close
+  busyRoad: 30,       // warning: main road
+  railway: 50,        // warning: railway
+  tram: 20,           // warning: tram line
+  stop: 15,           // warning: bus or tram stop
+  drinkingWater: 300, // nearby
+  toilet: 400,
+  food: 400,
+  bin: 20,
+  bikeParking: 50,
+};
+const SEARCH_RADIUS = 1500;   // spots are shown within this distance
+const GROUP_RADIUS = 15;      // benches and tables this close to a spot's first seat form one spot
+const FETCH_RADIUS = 5000;    // data is loaded and saved on the phone this far around you
+const TILE_LAT = 0.03;        // data is fetched in squares of about 3.3 km...
+const TILE_LON = 0.045;       // ...so moving around reuses what's already saved
+const TILE_MAX_AGE_DAYS = 14; // saved squares older than this are refreshed in the background
+const TILE_VERSION = 2;       // bump when the query changes, so saved squares are refreshed
+const MEASURE_LIMIT = 250;    // line and area distances are measured up to this
+
+const MATERIAL = { wood: 'wooden', metal: 'metal', steel: 'metal', stone: 'stone', granite: 'stone', concrete: 'concrete', plastic: 'plastic' };
+const FOOD_LABEL = { bakery: 'Bakery', supermarket: 'Supermarket', convenience: 'Corner shop' };
+
+function clipBox(c, half) {
+  const dLat = half / 110574;
+  const dLon = half / (111320 * Math.cos(c.lat * Math.PI / 180));
+  return [c.lat - dLat, c.lon - dLon, c.lat + dLat, c.lon + dLon];
+}
+
+function expandBox(box, m) {
+  const dLat = m / 110574, dLon = m / (111320 * Math.cos((box[0] + box[2]) / 2 * Math.PI / 180));
+  return [box[0] - dLat, box[1] - dLon, box[2] + dLat, box[3] + dLon];
+}
+function tileBox(id) {
+  const [i, j] = id.split('_').map(Number);
+  return [i * TILE_LAT, j * TILE_LON, (i + 1) * TILE_LAT, (j + 1) * TILE_LON];
+}
+// Squares that touch a circle, nearest first.
+function tilesForCircle(c, r) {
+  const dLat = r / 110574, dLon = r / (111320 * Math.cos(c.lat * Math.PI / 180));
+  const proj = makeProj(c), out = [];
+  for (let i = Math.floor((c.lat - dLat) / TILE_LAT); i <= Math.floor((c.lat + dLat) / TILE_LAT); i++) {
+    for (let j = Math.floor((c.lon - dLon) / TILE_LON); j <= Math.floor((c.lon + dLon) / TILE_LON); j++) {
+      const id = i + '_' + j, b = tileBox(id);
+      const [x, y] = proj(Math.min(Math.max(c.lat, b[0]), b[2]), Math.min(Math.max(c.lon, b[1]), b[3]));
+      const d = Math.hypot(x, y);
+      if (d <= r) out.push({ id, d });
+    }
+  }
+  return out.sort((a, b) => a.d - b.d).map(t => t.id);
+}
+
+function buildTileQuery(box) {
+  const bb = box.map(v => v.toFixed(5)).join(',');
+  const clip = expandBox(box, 120).map(v => v.toFixed(5)).join(',');
+  return `[out:json][timeout:45][maxsize:268435456][bbox:${bb}];
+make section name="spots";out;
+(
+  node["amenity"="bench"];
+  way["amenity"="bench"];
+  node["leisure"="picnic_table"];
+  way["leisure"="picnic_table"];
+  nwr["amenity"="toilets"];
+);
+out center qt;
+make section name="pois";out;
+(
+  nwr["amenity"="drinking_water"];
+  nwr["amenity"="fountain"]["drinking_water"="yes"];
+  nwr["man_made"="water_tap"]["drinking_water"="yes"];
+  nwr["shop"~"^(bakery|supermarket|convenience)$"];
+  nwr["amenity"="bicycle_parking"];
+  nwr["tourism"="viewpoint"];
+  nwr["amenity"="shelter"];
+  nwr["historic"~"^(castle|monument|ruins|city_gate|fort|tower|manor|church)$"]["name"];
+  nwr["amenity"="place_of_worship"]["name"];
+  nwr["tourism"~"^(attraction|museum|artwork)$"]["name"];
+  nwr["amenity"="fountain"]["name"];
+  node["highway"="bus_stop"];
+  node["railway"="tram_stop"];
+  node["public_transport"="platform"];
+);
+out center qt;
+make section name="trees";out;
+node["natural"="tree"];
+out skel qt;
+make section name="bins";out;
+node["amenity"="waste_basket"];
+out skel qt;
+make section name="lines";out;
+(
+  way["highway"~"^(motorway|trunk|primary|secondary)(_link)?$"]["tunnel"!~"^(yes|building_passage)$"];
+  way["highway"~"^(pedestrian|footway|path)$"]["name"]["footway"!~"^(sidewalk|crossing|traffic_island)$"]["tunnel"!="yes"];
+  way["railway"~"^(rail|light_rail|narrow_gauge)$"]["tunnel"!="yes"];
+  way["railway"="tram"]["tunnel"!="yes"];
+  way["waterway"~"^(river|canal|stream)$"]["tunnel"!~"^(yes|culvert)$"];
+  way["natural"="tree_row"];
+  way["natural"="water"];
+  relation["natural"="water"];
+);
+out geom(${clip});
+make section name="areas";out;
+(
+  way["leisure"~"^(park|garden)$"];
+  relation["leisure"~"^(park|garden)$"];
+  way["landuse"="cemetery"];
+  relation["landuse"="cemetery"];
+  way["amenity"="grave_yard"];
+  way["landuse"="forest"];
+  relation["landuse"="forest"];
+  way["natural"="wood"];
+  relation["natural"="wood"];
+);
+out geom;`;
+}
+
+// Keeps only what the summaries need, so saved squares stay small.
+const KEEP_TAGS = new Set(['amenity', 'leisure', 'highway', 'railway', 'waterway', 'natural', 'water', 'landuse', 'tourism',
+  'shop', 'man_made', 'drinking_water', 'access', 'garden:type', 'public_transport', 'bus', 'tram', 'footway', 'tunnel',
+  'backrest', 'material', 'covered', 'seats', 'direction', 'fee', 'charge', 'opening_hours', 'wheelchair', 'changing_table']);
+function slimTags(t) {
+  const o = {};
+  for (const k in t) if (KEEP_TAGS.has(k)) o[k] = t[k];
+  return o;
+}
+function slimTile(json, box) {
+  const s = splitSections(json);
+  const r6 = v => Math.round(v * 1e6) / 1e6;
+  const pts = g => g.map(p => (p && p.lat != null ? { lat: r6(p.lat), lon: r6(p.lon) } : null));
+  const pt = (el, keepName) => {
+    const o = { type: el.type, id: el.id, tags: slimTags(el.tags || {}) };
+    if (keepName && el.tags && el.tags.name) o.tags.name = el.tags.name;
+    if (el.lat != null) { o.lat = r6(el.lat); o.lon = r6(el.lon); } else if (el.center) o.center = { lat: r6(el.center.lat), lon: r6(el.center.lon) };
+    return o;
+  };
+  const shape = (el, clip) => {
+    const o = { type: el.type, id: el.id, tags: slimTags(el.tags || {}) };
+    if (el.geometry) o.geometry = pts(el.geometry);
+    if (el.members) o.members = el.members.filter(m => m.type === 'way' && m.geometry).map(m => ({ type: 'way', geometry: pts(m.geometry) }));
+    if (clip) o.clip = clip;
+    return o;
+  };
+  const flat = list => {
+    const a = [];
+    for (const el of list) if (el.lat != null) a.push(r6(el.lat), r6(el.lon));
+    return a;
+  };
+  const clip = expandBox(box, 120);
+  return {
+    spots: s.spots.map(el => pt(el)), pois: s.pois.map(el => pt(el, true)), trees: flat(s.trees), bins: flat(s.bins),
+    lines: s.lines.map(el => shape(el, clip)), areas: s.areas.map(el => shape(el, null)),
+  };
+}
+// Combines saved squares. Points and areas appear once; clipped lines keep each square's piece.
+function mergeTiles(list) {
+  const out = { spots: [], pois: [], trees: [], bins: [], lines: [], areas: [] };
+  const seen = { spots: new Set(), pois: new Set(), areas: new Set() };
+  for (const d of list) {
+    for (const k of ['spots', 'pois', 'areas']) {
+      for (const el of d[k]) {
+        const key = el.type + '/' + el.id;
+        if (seen[k].has(key)) continue;
+        seen[k].add(key);
+        out[k].push(el);
+      }
+    }
+    for (const el of d.lines) out.lines.push(el);
+    out.trees.push(d.trees);
+    out.bins.push(d.bins);
+  }
+  return out;
+}
+
+function buildQuery(c, R = SEARCH_RADIUS) {
+  const R1 = R + 60;    // local context (roads, trees, water...)
+  const R2 = R + 420;   // amenities that count as "nearby"
+  const ll = `${c.lat.toFixed(6)},${c.lon.toFixed(6)}`;
+  const a = r => `(around:${r},${ll})`;
+  const bb = clipBox(c, R1 + 150).map(v => v.toFixed(6)).join(',');
+  return `[out:json][timeout:45][maxsize:268435456];
+make section name="spots";out;
+(
+  node["amenity"="bench"]${a(R)};
+  way["amenity"="bench"]${a(R)};
+  node["leisure"="picnic_table"]${a(R)};
+  way["leisure"="picnic_table"]${a(R)};
+  nwr["amenity"="toilets"]${a(R2)};
+);
+out center qt;
+make section name="pois";out;
+(
+  nwr["amenity"="drinking_water"]${a(R2)};
+  nwr["amenity"="fountain"]["drinking_water"="yes"]${a(R2)};
+  nwr["man_made"="water_tap"]["drinking_water"="yes"]${a(R2)};
+  nwr["shop"~"^(bakery|supermarket|convenience)$"]${a(R2)};
+  nwr["amenity"="bicycle_parking"]${a(R1)};
+  nwr["tourism"="viewpoint"]${a(R1)};
+  nwr["amenity"="shelter"]${a(R1)};
+  node["highway"="bus_stop"]${a(R1)};
+  node["railway"="tram_stop"]${a(R1)};
+  node["public_transport"="platform"]${a(R1)};
+);
+out center qt;
+make section name="trees";out;
+node["natural"="tree"]${a(R1)};
+out skel qt;
+make section name="bins";out;
+node["amenity"="waste_basket"]${a(R1)};
+out skel qt;
+make section name="lines";out;
+(
+  way["highway"~"^(motorway|trunk|primary|secondary)(_link)?$"]["tunnel"!~"^(yes|building_passage)$"]${a(R1)};
+  way["highway"~"^(pedestrian|footway|path)$"]["name"]["footway"!~"^(sidewalk|crossing|traffic_island)$"]["tunnel"!="yes"]${a(R1)};
+  way["railway"~"^(rail|light_rail|narrow_gauge)$"]["tunnel"!="yes"]${a(R1)};
+  way["railway"="tram"]["tunnel"!="yes"]${a(R1)};
+  way["waterway"~"^(river|canal|stream)$"]["tunnel"!~"^(yes|culvert)$"]${a(R1)};
+  way["natural"="tree_row"]${a(R1)};
+  way["natural"="water"]${a(R1)};
+  relation["natural"="water"]${a(R1)};
+);
+out geom(${bb});
+make section name="areas";out;
+(
+  way["leisure"~"^(park|garden)$"]${a(R1)};
+  relation["leisure"~"^(park|garden)$"]${a(R1)};
+  way["landuse"="cemetery"]${a(R1)};
+  relation["landuse"="cemetery"]${a(R1)};
+  way["amenity"="grave_yard"]${a(R1)};
+  way["landuse"="forest"]${a(R1)};
+  relation["landuse"="forest"]${a(R1)};
+  way["natural"="wood"]${a(R1)};
+  relation["natural"="wood"]${a(R1)};
+);
+out geom;`;
+}
+
+/* ---------- geometry helpers (local metric coordinates) ---------- */
+
+function makeProj(c) {
+  const kx = 111320 * Math.cos(c.lat * Math.PI / 180), ky = 110574;
+  return (lat, lon) => [(lon - c.lon) * kx, (lat - c.lat) * ky];
+}
+function coordOf(el) {
+  if (el.lat != null) return [el.lat, el.lon];
+  if (el.center) return [el.center.lat, el.center.lon];
+  return null;
+}
+// Turns a way or relation into a flat list of segments [x1,y1,x2,y2, ...].
+// Clipped output may contain nulls; gaps are never bridged.
+function buildFeature(el, proj, clipHalf) {
+  const segs = [];
+  const box = el.clip;
+  const offBox = g => box ? (g.lat < box[0] || g.lat > box[2] || g.lon < box[1] || g.lon > box[3]) : false;
+  const offHalf = p => clipHalf && (Math.abs(p[0]) > clipHalf || Math.abs(p[1]) > clipHalf);
+  const add = geom => {
+    let prev = null, prevG = null;
+    for (const g of geom) {
+      if (!g || g.lat == null) { prev = null; prevG = null; continue; }
+      const p = proj(g.lat, g.lon);
+      // A segment with both ends outside the clip area can be a bridge over omitted nodes, so skip it.
+      if (prev && !(offBox(prevG) && offBox(g)) && !(offHalf(prev) && offHalf(p))) segs.push(prev[0], prev[1], p[0], p[1]);
+      prev = p;
+      prevG = g;
+    }
+  };
+  if (el.type === 'way' && el.geometry) add(el.geometry);
+  if (el.type === 'relation' && el.members) {
+    for (const m of el.members) if (m.type === 'way' && m.geometry) add(m.geometry);
+  }
+  if (!segs.length) return null;
+  let minx = Infinity, miny = Infinity, maxx = -Infinity, maxy = -Infinity;
+  for (let i = 0; i < segs.length; i += 2) {
+    const x = segs[i], y = segs[i + 1];
+    if (x < minx) minx = x; if (x > maxx) maxx = x;
+    if (y < miny) miny = y; if (y > maxy) maxy = y;
+  }
+  return { segs, minx, miny, maxx, maxy, tags: el.tags || {} };
+}
+function segDist(px, py, x1, y1, x2, y2) {
+  const dx = x2 - x1, dy = y2 - y1, L = dx * dx + dy * dy;
+  let t = L ? ((px - x1) * dx + (py - y1) * dy) / L : 0;
+  t = t < 0 ? 0 : t > 1 ? 1 : t;
+  return Math.hypot(px - (x1 + t * dx), py - (y1 + t * dy));
+}
+function boxDist(f, px, py) {
+  const dx = Math.max(f.minx - px, 0, px - f.maxx), dy = Math.max(f.miny - py, 0, py - f.maxy);
+  return Math.hypot(dx, dy);
+}
+function nearestLine(list, px, py, limit = MEASURE_LIMIT) {
+  let best = Infinity;
+  for (const f of list) {
+    if (boxDist(f, px, py) > Math.min(best, limit)) continue;
+    const s = f.segs;
+    for (let i = 0; i < s.length; i += 4) {
+      const d = segDist(px, py, s[i], s[i + 1], s[i + 2], s[i + 3]);
+      if (d < best) best = d;
+    }
+  }
+  return best <= limit ? best : Infinity;
+}
+// Like nearestLine, but also returns the nearest point, so we know which way it lies.
+function nearestLinePoint(list, px, py, limit = MEASURE_LIMIT) {
+  let best = Infinity, bx = 0, by = 0;
+  for (const f of list) {
+    if (boxDist(f, px, py) > Math.min(best, limit)) continue;
+    const s = f.segs;
+    for (let i = 0; i < s.length; i += 4) {
+      const x1 = s[i], y1 = s[i + 1], dx = s[i + 2] - x1, dy = s[i + 3] - y1, L = dx * dx + dy * dy;
+      let t = L ? ((px - x1) * dx + (py - y1) * dy) / L : 0;
+      t = t < 0 ? 0 : t > 1 ? 1 : t;
+      const qx = x1 + t * dx, qy = y1 + t * dy, d = Math.hypot(px - qx, py - qy);
+      if (d < best) { best = d; bx = qx; by = qy; }
+    }
+  }
+  return best <= limit ? { d: best, x: bx, y: by } : null;
+}
+// Compass direction from one point to another: 0 north, 90 east, 180 south, 270 west.
+const bearingTo = (px, py, qx, qy) => (Math.atan2(qx - px, qy - py) * 180 / Math.PI + 360) % 360;
+
+// Even-odd ray casting over all segments, so multipolygons with holes work too.
+function inside(f, px, py) {
+  if (px < f.minx || px > f.maxx || py < f.miny || py > f.maxy) return false;
+  let c = false;
+  const s = f.segs;
+  for (let i = 0; i < s.length; i += 4) {
+    const y1 = s[i + 1], y2 = s[i + 3];
+    if ((y1 > py) !== (y2 > py)) {
+      const x = s[i] + (py - y1) * (s[i + 2] - s[i]) / (y2 - y1);
+      if (px < x) c = !c;
+    }
+  }
+  return c;
+}
+function nearestPoint(list, px, py, skipKey) {
+  let best = Infinity, item = null;
+  for (const p of list) {
+    if (p.key === skipKey) continue;
+    const d = Math.hypot(p.x - px, p.y - py);
+    if (d < best) { best = d; item = p; }
+  }
+  return { d: best, item };
+}
+function makeGrid(cell) { return { cell, m: new Map() }; }
+function gridAdd(g, x, y) {
+  const k = Math.floor(x / g.cell) + ',' + Math.floor(y / g.cell);
+  let a = g.m.get(k);
+  if (!a) { a = []; g.m.set(k, a); }
+  a.push(x, y);
+}
+function gridScan(g, x, y, r) {
+  const cx = Math.floor(x / g.cell), cy = Math.floor(y / g.cell), span = Math.ceil(r / g.cell);
+  let count = 0, nearest = Infinity;
+  for (let i = cx - span; i <= cx + span; i++) {
+    for (let j = cy - span; j <= cy + span; j++) {
+      const a = g.m.get(i + ',' + j);
+      if (!a) continue;
+      for (let k = 0; k < a.length; k += 2) {
+        const d = Math.hypot(a[k] - x, a[k + 1] - y);
+        if (d <= r) count++;
+        if (d < nearest) nearest = d;
+      }
+    }
+  }
+  return { count, nearest: nearest <= r ? nearest : Infinity };
+}
+
+/* ---------- classification ---------- */
+
+const isClosed = t => /^(private|no)$/.test(t.access || '');
+function stopLabel(t) {
+  if (t.railway === 'tram_stop' || t.tram === 'yes') return 'Tram stop';
+  if (t.highway === 'bus_stop' || t.bus === 'yes') return 'Bus stop';
+  return 'Stop';
+}
+function waterKind(t) {
+  const w = t.water;
+  if (!w) return 'water';
+  if (/^(lake|reservoir|lagoon)$/.test(w)) return 'lake';
+  if (/^(river|canal|oxbow)$/.test(w)) return 'river';
+  if (/^(wastewater|basin|fish_pass|stream|ditch|moat)$/.test(w)) return null;
+  return 'pond';
+}
+function splitSections(json) {
+  const s = { spots: [], pois: [], trees: [], bins: [], lines: [], areas: [] };
+  let cur = null;
+  for (const el of json.elements || []) {
+    if (el.type === 'section') { cur = el.tags && el.tags.name; continue; }
+    if (cur && s[cur]) s[cur].push(el);
+  }
+  return s;
+}
+
+/* ---------- analysis ---------- */
+
+function analyse(json, center, R = SEARCH_RADIUS) {
+  const sec = splitSections(json);
+  sec.trees = [sec.trees.flatMap(el => (el.lat != null ? [el.lat, el.lon] : []))];
+  sec.bins = [sec.bins.flatMap(el => (el.lat != null ? [el.lat, el.lon] : []))];
+  return analyseSections(sec, center, R, R + 60 + 150);
+}
+
+function analyseSections(sec, center, R = SEARCH_RADIUS, clipHalf = null) {
+  const proj = makeProj(center);
+
+  const P = { drink: [], food: [], bike: [], view: [], shelter: [], stop: [], toilet: [], landmark: [] };
+  const addPt = (list, el, extra) => {
+    const c = coordOf(el);
+    if (!c) return;
+    const [x, y] = proj(c[0], c[1]);
+    list.push(Object.assign({ x, y, key: el.type + '/' + el.id }, extra));
+  };
+  for (const el of sec.pois) {
+    const t = el.tags || {};
+    if (isClosed(t)) continue;
+    if (t.amenity === 'drinking_water' && t.drinking_water !== 'no') addPt(P.drink, el);
+    if ((t.amenity === 'fountain' || t.man_made === 'water_tap') && t.drinking_water === 'yes') addPt(P.drink, el);
+    if (FOOD_LABEL[t.shop]) addPt(P.food, el, { label: FOOD_LABEL[t.shop] });
+    if (t.amenity === 'bicycle_parking') addPt(P.bike, el);
+    if (t.tourism === 'viewpoint') addPt(P.view, el);
+    if (t.amenity === 'shelter') addPt(P.shelter, el);
+    if (t.name && (t.historic || t.amenity === 'place_of_worship' || /^(attraction|museum|artwork)$/.test(t.tourism || '')
+      || (t.amenity === 'fountain' && t.drinking_water !== 'yes'))) addPt(P.landmark, el, { label: t.name });
+    if (t.highway === 'bus_stop' || t.railway === 'tram_stop' || t.public_transport === 'platform') addPt(P.stop, el, { label: stopLabel(t) });
+  }
+  for (const el of sec.spots) {
+    const t = el.tags || {};
+    if (t.amenity === 'toilets' && !isClosed(t)) addPt(P.toilet, el);
+  }
+
+  const trees = makeGrid(20), bins = makeGrid(20);
+  for (const a of sec.trees) for (let i = 0; i < a.length; i += 2) gridAdd(trees, ...proj(a[i], a[i + 1]));
+  for (const a of sec.bins) for (let i = 0; i < a.length; i += 2) gridAdd(bins, ...proj(a[i], a[i + 1]));
+
+  const Lf = { road: [], promenade: [], rail: [], tram: [], river: [], stream: [], lake: [], pond: [], water: [], treerow: [] };
+  for (const el of sec.lines) {
+    const t = el.tags || {};
+    let b = null;
+    if (/^(pedestrian|footway|path)$/.test(t.highway || '')) b = 'promenade';
+    else if (t.highway) b = 'road';
+    else if (t.railway === 'tram') b = 'tram';
+    else if (t.railway) b = 'rail';
+    else if (t.waterway === 'stream') b = 'stream';
+    else if (t.waterway) b = 'river';
+    else if (t.natural === 'tree_row') b = 'treerow';
+    else if (t.natural === 'water') b = waterKind(t);
+    if (!b) continue;
+    const f = buildFeature(el, proj, clipHalf);
+    if (f) Lf[b].push(f);
+  }
+
+  const A = { park: [], garden: [], cemetery: [], forest: [] };
+  for (const el of sec.areas) {
+    const t = el.tags || {};
+    let b = null;
+    if (t.landuse === 'cemetery' || t.amenity === 'grave_yard') b = 'cemetery';
+    else if (t.leisure === 'park') b = 'park';
+    else if (t.leisure === 'garden') b = (isClosed(t) || /^(residential|private)$/.test(t['garden:type'] || '')) ? null : 'garden';
+    else if (t.landuse === 'forest' || t.natural === 'wood') b = 'forest';
+    if (!b) continue;
+    const f = buildFeature(el, proj, null);
+    if (f) A[b].push(f);
+  }
+
+  const D = { P, Lf, A, trees, bins };
+  const spots = [], seats = [];
+  for (const el of sec.spots) {
+    const t = el.tags || {};
+    const kind = t.amenity === 'bench' ? 'bench' : t.leisure === 'picnic_table' ? 'table' : t.amenity === 'toilets' ? 'toilet' : null;
+    if (!kind || isClosed(t)) continue;
+    const c = coordOf(el);
+    if (!c) continue;
+    const [x, y] = proj(c[0], c[1]);
+    const dist = Math.hypot(x, y);
+    const id = el.type + '/' + el.id;
+    const item = { id, el, kind, lat: c[0], lon: c[1], x, y, dist, tags: t, added: el.type === 'user' };
+    if (kind === 'toilet') {
+      if (dist > R) continue;
+      const spot = {
+        id, osmType: el.type, osmId: el.id, kind, lat: c[0], lon: c[1], dist, tags: t, added: false,
+        members: [{ id, kind, lat: c[0], lon: c[1], added: false }], counts: { bench: 0, table: 0 }, hasBench: false, hasTable: false,
+      };
+      spot.m = measure(x, y, id, D);
+      spot.text = describe(spot);
+      spot.flags = flagsOf(spot.m);
+      spots.push(spot);
+    } else if (dist <= R + GROUP_RADIUS) {
+      seats.push(item);
+    }
+  }
+
+  // Group seats into spots. Each spot is a circle of GROUP_RADIUS around its first seat,
+  // so a row of benches along a promenade becomes a row of spots instead of one long chain.
+  // Older OpenStreetMap entries go first, so spots keep the same first seat over time.
+  const rank = s => (s.added ? 2 : s.el.type === 'node' ? 0 : 1);
+  seats.sort((a, b) => rank(a) - rank(b) || Number(a.el.id) - Number(b.el.id));
+  const grid = new Map(), cell = GROUP_RADIUS;
+  seats.forEach((s, i) => {
+    const k = Math.floor(s.x / cell) + ',' + Math.floor(s.y / cell);
+    if (!grid.has(k)) grid.set(k, []);
+    grid.get(k).push(i);
+  });
+  const used = new Uint8Array(seats.length);
+  seats.forEach((seed, i) => {
+    if (used[i]) return;
+    used[i] = 1;
+    const members = [seed];
+    const cx = Math.floor(seed.x / cell), cy = Math.floor(seed.y / cell);
+    for (let a = cx - 1; a <= cx + 1; a++) {
+      for (let b = cy - 1; b <= cy + 1; b++) {
+        for (const j of grid.get(a + ',' + b) || []) {
+          if (used[j]) continue;
+          if (Math.hypot(seats[j].x - seed.x, seats[j].y - seed.y) <= GROUP_RADIUS) { used[j] = 1; members.push(seats[j]); }
+        }
+      }
+    }
+    const mx = members.reduce((n, s) => n + s.x, 0) / members.length;
+    const my = members.reduce((n, s) => n + s.y, 0) / members.length;
+    const dist = Math.hypot(mx, my);
+    if (dist > R) return;
+    const counts = { bench: members.filter(s => s.kind === 'bench').length, table: members.filter(s => s.kind === 'table').length };
+    const spot = {
+      id: seed.id, osmType: seed.el.type, osmId: seed.el.id,
+      kind: counts.bench ? 'bench' : 'table',
+      lat: members.reduce((n, s) => n + s.lat, 0) / members.length,
+      lon: members.reduce((n, s) => n + s.lon, 0) / members.length,
+      dist, tags: groupTags(members), added: seed.added,
+      members: members.map(s => ({ id: s.id, kind: s.kind, lat: s.lat, lon: s.lon, added: s.added })),
+      counts, hasBench: counts.bench > 0, hasTable: counts.table > 0,
+    };
+    spot.m = combineMeasures(members.map(s => measure(s.x, s.y, s.id, D)));
+    spot.text = describe(spot);
+    spot.flags = flagsOf(spot.m);
+    spot.estimate = estimateOf(spot);
+    spots.push(spot);
+  });
+  spots.sort((a, b) => a.dist - b.dist);
+  return spots;
+}
+
+// A spot is described by its best and worst seats: nearest water, nearest road, and so on.
+function combineMeasures(list) {
+  if (list.length === 1) return list[0];
+  const m = {};
+  for (const k of Object.keys(list[0])) {
+    const vals = list.map(x => x[k]);
+    if (typeof vals[0] === 'number') m[k] = k === 'trees' ? Math.max(...vals) : Math.min(...vals);
+    else if (typeof vals[0] === 'boolean') m[k] = vals.some(Boolean);
+  }
+  m.stopLabel = list.reduce((a, b) => (b.stop < a.stop ? b : a)).stopLabel;
+  const wet = list.reduce((a, b) => (Math.min(b.lake, b.river) < Math.min(a.lake, a.river) ? b : a));
+  m.waterDir = wet.waterDir;
+  m.landmarkName = list.reduce((a, b) => (b.landmark < a.landmark ? b : a)).landmarkName;
+  m.foodLabel = list.reduce((a, b) => (b.food < a.food ? b : a)).foodLabel;
+  return m;
+}
+function groupTags(members) {
+  if (members.length === 1) return members[0].tags;
+  const benches = members.filter(s => s.kind === 'bench');
+  const t = {};
+  const backs = benches.map(s => s.tags.backrest);
+  if (backs.length && backs.every(v => v === 'yes')) t.backrest = 'yes';
+  else if (backs.some(v => v === 'yes')) t.backrest = 'some';
+  else if (backs.length && backs.every(v => v === 'no')) t.backrest = 'no';
+  const mats = benches.map(s => s.tags.material);
+  if (mats.length && mats[0] && mats.every(v => v === mats[0])) t.material = mats[0];
+  if (members.some(s => s.tags.covered === 'yes')) t.covered = 'yes';
+  return t;
+}
+
+function measure(x, y, key, D) {
+  const line = list => nearestLine(list, x, y);
+  const near = list => nearestPoint(list, x, y, key);
+  const m = {};
+  m.lake = line(D.Lf.lake);
+  m.river = line(D.Lf.river);
+  // Which way the nearest lake or river lies, for "sunset over the water".
+  const wl = nearestLinePoint(D.Lf.lake, x, y), wr = nearestLinePoint(D.Lf.river, x, y);
+  const w = wl && (!wr || wl.d <= wr.d) ? wl : wr;
+  m.waterDir = w ? Math.round(bearingTo(x, y, w.x, w.y)) : -1;
+  m.stream = line(D.Lf.stream);
+  m.promenade = line(D.Lf.promenade);
+  m.pond = line(D.Lf.pond);
+  m.water = line(D.Lf.water);
+  m.inPark = D.A.park.some(f => inside(f, x, y));
+  m.inGarden = D.A.garden.some(f => inside(f, x, y));
+  m.inCemetery = D.A.cemetery.some(f => inside(f, x, y));
+  m.inForest = D.A.forest.some(f => inside(f, x, y));
+  m.forestEdge = line(D.A.forest);
+  m.view = near(D.P.view).d;
+  const lm = near(D.P.landmark);
+  m.landmark = lm.d;
+  m.landmarkName = lm.item ? lm.item.label : '';
+  m.trees = gridScan(D.trees, x, y, RULES.shadeRadius).count;
+  m.treeRow = line(D.Lf.treerow);
+  m.shelter = near(D.P.shelter).d;
+  m.road = line(D.Lf.road);
+  m.rail = line(D.Lf.rail);
+  m.tram = line(D.Lf.tram);
+  const st = near(D.P.stop);
+  m.stop = st.d;
+  m.stopLabel = st.item ? st.item.label : 'Stop';
+  m.drink = near(D.P.drink).d;
+  m.toilet = near(D.P.toilet).d;
+  const fd = near(D.P.food);
+  m.food = fd.d;
+  m.foodLabel = fd.item ? fd.item.label : 'Shop';
+  m.bin = gridScan(D.bins, x, y, 60).nearest;
+  m.bike = near(D.P.bike).d;
+  return m;
+}
+
+/* ---------- the summary ---------- */
+
+const cap = s => s ? s[0].toUpperCase() + s.slice(1) : s;
+
+function describe(s) {
+  const t = s.tags, m = s.m, R = RULES;
+  const facts = [], warnings = [];
+  const where =
+    m.inCemetery ? 'in a cemetery' :
+    m.inPark ? 'in a park' :
+    m.inGarden ? 'in a garden' :
+    m.inForest ? 'in the woods' :
+    m.forestEdge <= R.forestEdge ? 'at the forest edge' : '';
+
+  if (s.kind === 'toilet') {
+    const fee = t.fee === 'no' ? 'free' : t.fee === 'yes' ? 'paid' : '';
+    const noun = t.access === 'customers' ? 'toilet for customers' : 'public toilet';
+    let sentence = [fee, noun].filter(Boolean).join(' ') + (where ? ' ' + where : '');
+    if (t.fee === 'yes' && t.charge) sentence += ` (${t.charge})`;
+    const c = [];
+    const oh = (t.opening_hours || '').trim();
+    if (oh === '24/7') c.push('open 24/7');
+    else if (oh) c.push('hours ' + (oh.length > 48 ? oh.slice(0, 46) + '…' : oh));
+    if (t.wheelchair === 'yes') c.push('wheelchair accessible');
+    else if (t.wheelchair === 'limited') c.push('limited wheelchair access');
+    else if (t.wheelchair === 'no') c.push('not wheelchair accessible');
+    if (t.changing_table === 'yes') c.push('changing table');
+    if (m.drink <= R.drinkingWater) facts.push({ label: 'Drinking water', d: m.drink });
+    if (m.food <= R.food) facts.push({ label: m.foodLabel, d: m.food });
+    if (m.bike <= R.bikeParking) facts.push({ label: 'Bike parking', d: m.bike });
+    return {
+      sentence: cap(sentence) + '.',
+      comfort: c.length ? cap(c.join(', ')) + '.' : '',
+      note: !fee && !oh ? 'Fee and opening hours not mapped.' : '',
+      facts, warnings,
+    };
+  }
+
+  const nb = s.counts ? s.counts.bench : s.kind === 'bench' ? 1 : 0;
+  const nt = s.counts ? s.counts.table : s.kind === 'table' ? 1 : 0;
+  const mat = MATERIAL[t.material] ? MATERIAL[t.material] + ' ' : '';
+  let noun;
+  if (nb + nt <= 1) noun = mat + (nt ? 'picnic table' : 'bench');
+  else if (nb <= 1 && nt <= 1) noun = 'bench and picnic table';
+  else if (!nt) noun = `group of ${nb} ${mat}benches`;
+  else if (!nb) noun = `group of ${nt} picnic tables`;
+  else noun = `group of ${nb} ${nb === 1 ? 'bench' : mat + 'benches'} and ${nt === 1 ? 'a picnic table' : nt + ' picnic tables'}`;
+  const lakeside = m.lake <= R.lake;
+  const riverside = !lakeside && m.river <= R.river;
+  const head = [lakeside ? 'lakeside' : riverside ? 'riverside' : '', noun].filter(Boolean).join(' ');
+  const tail = [];
+  if (where) tail.push(where);
+  if (m.promenade <= R.promenade) tail.push('on a promenade');
+  if (!lakeside && !riverside) {
+    if (m.stream <= R.stream) tail.push('by a stream');
+    else if (m.pond <= R.pond) tail.push('by a pond');
+    else if (m.water <= R.pond) tail.push('by the water');
+  }
+  if (m.landmark <= R.landmark && m.landmarkName) tail.push(`near ${m.landmarkName}`);
+  if (m.view <= R.view) tail.push('with a view');
+  if (sunsetWater(m)) tail.push('with sunsets over the water');
+  const sentence = cap(head + (tail.length ? ' ' + tail.join(', ') : '')) + '.';
+
+  const c = [];
+  if (nb) {
+    if (t.backrest === 'yes') c.push(nb > 1 ? 'backrests' : 'backrest');
+    else if (t.backrest === 'some') c.push('some with backrest');
+    else if (t.backrest === 'no') c.push('no backrest');
+  }
+  if (t.covered === 'yes' || m.shelter <= R.shelter) c.push('roofed');
+  if (!m.inForest && (m.trees >= R.shadeTrees || m.treeRow <= R.shadeRadius)) c.push('likely shaded');
+
+  if (m.drink <= R.drinkingWater) facts.push({ label: 'Drinking water', d: m.drink });
+  if (m.toilet <= R.toilet) facts.push({ label: 'Toilet', d: m.toilet });
+  if (m.food <= R.food) facts.push({ label: m.foodLabel, d: m.food });
+  if (m.bin <= R.bin) facts.push({ label: 'Bin', d: m.bin });
+  if (m.bike <= R.bikeParking) facts.push({ label: 'Bike parking', d: m.bike });
+
+  if (m.road <= R.busyRoad) warnings.push({ label: 'Busy road', d: m.road });
+  if (m.rail <= R.railway) warnings.push({ label: 'Railway', d: m.rail });
+  if (m.tram <= R.tram) warnings.push({ label: 'Tram line', d: m.tram });
+  if (m.stop <= R.stop) warnings.push({ label: m.stopLabel, d: m.stop });
+
+  return {
+    sentence,
+    comfort: c.length ? cap(c.join(', ')) + '.' : '',
+    note: !tail.length && !c.length && head === noun && nb + nt <= 1 ? 'Nothing notable mapped around it.' : '',
+    facts, warnings,
+  };
+}
+
+// A first guess at how nice a spot is (1 to 5), from its surroundings alone.
+// Used before anyone has rated it, so a new town doesn't look empty.
+const PROMISING_FROM = 4.0;
+function estimateOf(s) {
+  if (s.kind === 'toilet') return null;
+  const m = s.m, R = RULES, t = s.tags || {};
+  let x = 2.6;
+  if (m.lake <= R.lake || m.river <= R.river) x += 1.2;
+  else if (m.stream <= R.stream || m.pond <= R.pond || m.water <= R.pond) x += 0.8;
+  if (m.inPark || m.inGarden) x += 0.6;
+  if (m.inForest || m.forestEdge <= R.forestEdge) x += 0.6;
+  if (m.view <= R.view) x += 0.8;
+  if (sunsetWater(m)) x += 0.3;
+  if (m.landmark <= R.landmark && m.landmarkName) x += 0.3;
+  if (m.promenade <= R.promenade) x += 0.3;
+  if (m.trees >= R.shadeTrees || m.treeRow <= R.shadeRadius) x += 0.2;
+  if (t.backrest === 'yes' || t.backrest === 'some') x += 0.2;
+  if (m.inCemetery) x -= 0.6;
+  if (m.road <= R.busyRoad) x -= 1.0;
+  if (m.rail <= R.railway) x -= 0.6;
+  if (m.tram <= R.tram) x -= 0.3;
+  if (m.stop <= R.stop) x -= 0.7;
+  return Math.max(1, Math.min(5, Math.round(x * 10) / 10));
+}
+
+// Sunset time for a place and day, calculated on the phone (the standard solar formulas, as in SunCalc).
+// Returns null where the sun doesn't set that day.
+function sunsetAt(date, lat, lon) {
+  const rad = Math.PI / 180, dayMs = 86400000, J1970 = 2440588, J2000 = 2451545, J0 = 0.0009;
+  const e = rad * 23.4397;
+  const d = date.valueOf() / dayMs - 0.5 + J1970 - J2000;
+  const lw = rad * -lon, phi = rad * lat;
+  const n = Math.round(d - J0 - lw / (2 * Math.PI));
+  const ds = J0 + lw / (2 * Math.PI) + n;
+  const M = rad * (357.5291 + 0.98560028 * ds);
+  const C = rad * (1.9148 * Math.sin(M) + 0.02 * Math.sin(2 * M) + 0.0003 * Math.sin(3 * M));
+  const L = M + C + rad * 102.9372 + Math.PI;
+  const dec = Math.asin(Math.sin(e) * Math.sin(L));
+  const cosW = (Math.sin(-0.833 * rad) - Math.sin(phi) * Math.sin(dec)) / (Math.cos(phi) * Math.cos(dec));
+  if (cosW < -1 || cosW > 1) return null;
+  const w = Math.acos(cosW);
+  const a = J0 + (w + lw) / (2 * Math.PI) + n;
+  const Jset = J2000 + a + 0.0053 * Math.sin(M) - 0.0069 * Math.sin(2 * L);
+  return new Date((Jset + 0.5 - J1970) * dayMs);
+}
+
+// The nearest lake or river lies to the west, so looking at the water means looking at the sunset.
+function sunsetWater(m) {
+  const R = RULES;
+  return (m.lake <= R.lake || m.river <= R.river) && m.waterDir >= R.sunsetFrom && m.waterDir <= R.sunsetTo;
+}
+
+// Yes/no features used by the filters.
+function flagsOf(m) {
+  const R = RULES;
+  return {
+    water: m.lake <= R.lake || m.river <= R.river || m.stream <= R.stream || m.pond <= R.pond || m.water <= R.pond,
+    green: m.inPark || m.inGarden || m.inForest || m.forestEdge <= R.forestEdge,
+    quiet: !(m.road <= R.busyRoad || m.rail <= R.railway || m.tram <= R.tram || m.stop <= R.stop),
+  };
+}
+
+function compass(deg) {
+  return ['north', 'northeast', 'east', 'southeast', 'south', 'southwest', 'west', 'northwest'][Math.round(deg / 45) % 8];
+}
+
+function fmtDist(d) {
+  if (!isFinite(d)) return 'none nearby';
+  if (d < 5) return 'under 5 m';
+  if (d < 100) return Math.round(d / 5) * 5 + ' m';
+  if (d < 1000) return Math.round(d / 10) * 10 + ' m';
+  if (d < 10000) return (d / 1000).toFixed(1).replace(/\.0$/, '') + ' km';
+  return Math.round(d / 1000).toLocaleString('en') + ' km';
+}
+
+// Raw measurements, shown when a spot is opened, for checking the rules.
+function measuredRows(s) {
+  const m = s.m, d = fmtDist;
+  const inside = [m.inPark && 'park', m.inGarden && 'garden', m.inCemetery && 'cemetery', m.inForest && 'woods'].filter(Boolean);
+  const rows = [
+    ['Lake', d(m.lake)],
+    ['River', d(m.river)],
+    ['Stream', d(m.stream)],
+    ['Pond or other water', d(Math.min(m.pond, m.water))],
+    ['Inside', inside.length ? inside.join(', ') : 'no park, garden, cemetery or woods'],
+    ['Forest edge', d(m.forestEdge)],
+    ['Named footpath', d(m.promenade)],
+    ['Viewpoint', d(m.view)],
+    ['Landmark', m.landmarkName && isFinite(m.landmark) ? `${m.landmarkName}, ${d(m.landmark)}` : d(m.landmark)],
+    ['Water lies to the', m.waterDir >= 0 ? compass(m.waterDir) + ` (${m.waterDir}°)` : 'no lake or river nearby'],
+    [`Trees within ${RULES.shadeRadius} m`, String(m.trees)],
+    ['Tree row', d(m.treeRow)],
+    ['Shelter', d(m.shelter)],
+    ['Main road', d(m.road)],
+    ['Railway', d(m.rail)],
+    ['Tram line', d(m.tram)],
+    ['Bus or tram stop', d(m.stop)],
+    ['Drinking water', d(m.drink)],
+    ['Toilet', d(m.toilet)],
+    ['Bakery or shop', d(m.food)],
+    ['Bin', d(m.bin)],
+    ['Bike parking', d(m.bike)],
+  ];
+  const keys = ['backrest', 'material', 'covered', 'seats', 'direction', 'fee', 'charge', 'opening_hours', 'wheelchair', 'changing_table', 'access'];
+  const tags = keys.filter(k => s.tags[k]).map(k => `${k}=${s.tags[k]}`).join(', ');
+  rows.push(['Mapped details', tags || 'none of the useful ones']);
+  return rows;
+}
+</script>
+
+<script id="game">
+/* ============================================================
+   Game: a hungry raccoon fed with snacks found at spots.
+   Pure functions only, so the rules can be tested on their own
+   and later moved to the server unchanged in meaning.
+   ============================================================ */
+
+const GAME = {
+  checkinRadius: 40,          // metres from the nearest seat of a spot
+  accuracySlack: 25,          // extra metres allowed for GPS error
+  maxAccuracy: 75,            // location fixes worse than this are refused
+  newSpotValue: 2,            // rating a spot for the first time gives 2 snacks
+  toiletValue: 1,             // rating a toilet for the first time gives 1 (never golden, no trinkets)
+  rareOneIn: 30,              // about 1 in 30 snacks is golden
+  rareValue: 5,               // a golden snack counts as 5
+  trinketOneIn: 8,            // about 1 in 8 check-ins finds a trinket you don't have yet
+  streakBonus: 1,             // first check-in of a week, while a weekly streak is running
+  rateWindowHours: 24,        // after a check-in, your rating can still be changed this long
+  addReward: 10,              // snacks for adding a missing bench
+  addsPerDay: 3,              // new pins per day
+  addMinGap: 15,              // metres to the nearest mapped bench or table
+  addMaxDistance: 40,         // the new pin can be dragged this far from where you stand
+  addMaxAccuracy: 30,         // adding needs a good location fix
+};
+
+const SNACKS = [
+  ['🍎', 'apple'], ['🥨', 'pretzel'], ['🥪', 'sandwich'], ['🍌', 'banana'],
+  ['🧀', 'piece of cheese'], ['🥐', 'croissant'], ['🍪', 'cookie'], ['🍇', 'bunch of grapes'],
+  ['🥕', 'carrot'], ['🍐', 'pear'], ['🥜', 'handful of peanuts'], ['🍓', 'few strawberries'],
+];
+
+const STAGES = [
+  { at: 0, label: 'Scrawny', scale: 0.82 },
+  { at: 5, label: 'Lean', scale: 0.95 },
+  { at: 20, label: 'Well fed', scale: 1.08 },
+  { at: 50, label: 'Round', scale: 1.22 },
+  { at: 100, label: 'Magnificently round', scale: 1.36 },
+];
+
+// Ten raccoons to choose from. Each has its own body, ears, tail, eyes and a few signature details.
+// The head stays the same size on all of them, so every trinket fits every raccoon.
+const RACCOONS = [
+  { id: 'pip', name: 'Pip', line: 'Always first to the crumbs.',
+    body: 'classic', ears: 'classic', tail: 'classic', eyes: 'normal', extras: ['cowlick'],
+    fur: '#9C968F', tail2: '#B3ADA6', band: '#5F5A55', mask: '#2E2A28', light: '#F2EEE7', belly: '#E4DED5', paw: '#3A3633' },
+  { id: 'rusty', name: 'Rusty', line: 'Smells a croissant from a kilometre away.',
+    body: 'classic', ears: 'pointy', tail: 'bushy', eyes: 'amber', extras: ['freckles'],
+    fur: '#B9764A', tail2: '#D19A70', band: '#7A4527', mask: '#3B2418', light: '#F6E8DA', belly: '#EBD3BD', paw: '#4A2E1F' },
+  { id: 'midnight', name: 'Midnight', line: 'Sneaks up on picnics without a sound.',
+    body: 'slim', ears: 'classic', tail: 'thin', eyes: 'sleepy', extras: ['crescent', 'socks'],
+    fur: '#4F4B47', tail2: '#77726C', band: '#26231F', mask: '#161412', light: '#E8E4DE', belly: '#A39E97', paw: '#2A2725' },
+  { id: 'biscuit', name: 'Biscuit', line: 'Will trade anything for a cookie.',
+    body: 'chubby', ears: 'round', tail: 'classic', eyes: 'normal', extras: ['pinkNose', 'blush'],
+    fur: '#D3BC96', tail2: '#E6D6B8', band: '#9B8461', mask: '#6E5A3E', light: '#FBF6EC', belly: '#F2E6D0', paw: '#7D6748' },
+  { id: 'fluff', name: 'Fluff', line: 'Mostly fur, partly appetite.',
+    body: 'classic', ears: 'classic', tail: 'bushy', eyes: 'normal', extras: ['mane', 'spiky'],
+    fur: '#B4AFA8', tail2: '#D6D1CA', band: '#6F6A64', mask: '#38342F', light: '#F7F4EF', belly: '#ECE7E0', paw: '#47423D' },
+  { id: 'hazel', name: 'Hazel', line: 'Knows every shortcut through the park.',
+    body: 'slim', ears: 'tufts', tail: 'broad', eyes: 'lashes', extras: [],
+    fur: '#8B6E55', tail2: '#A88C72', band: '#4F3B2B', mask: '#2A1F17', light: '#F1E8DE', belly: '#DCCBB8', paw: '#35281E' },
+  { id: 'pepper', name: 'Pepper', line: 'Collects anything that glitters.',
+    body: 'classic', ears: 'floppy', tail: 'thin', eyes: 'normal', extras: ['speckles', 'earring'],
+    fur: '#A3A7AB', tail2: '#C8CBCE', band: '#4B4F54', mask: '#25282B', light: '#F4F5F6', belly: '#DFE2E4', paw: '#33363A' },
+  { id: 'sage', name: 'Sage', line: 'Old, wise and very picky about views.',
+    body: 'classic', ears: 'classic', tail: 'broad', eyes: 'normal', extras: ['blaze', 'brows', 'whiskers'],
+    fur: '#8E9585', tail2: '#AAB0A1', band: '#545A4C', mask: '#2C3027', light: '#F1F2EC', belly: '#DADDD2', paw: '#383C33' },
+  { id: 'coco', name: 'Coco', line: 'Grins at every single snack.',
+    body: 'chubby', ears: 'classic', tail: 'classic', eyes: 'normal', extras: ['teeth', 'heartBelly', 'curl'],
+    fur: '#6B4E3D', tail2: '#8A6A56', band: '#3B2A20', mask: '#1F1612', light: '#EFE4DA', belly: '#C9B2A1', paw: '#2A1E18' },
+  { id: 'nimbus', name: 'Nimbus', line: 'Small, cloud-soft and impossible to ignore.',
+    body: 'tiny', ears: 'round', tail: 'bushy', eyes: 'sparkle', extras: ['pinkPaws'],
+    fur: '#DDD8D1', tail2: '#F0ECE6', band: '#A9A39B', mask: '#7C766E', light: '#FFFFFF', belly: '#F6F3EE', paw: '#8E8880' },
+];
+const raccoonById = id => RACCOONS.find(r => r.id === id) || RACCOONS[0];
+
+// Every check-in is a rating from 1 to 5 stars. Only your latest rating of a spot counts.
+// Each star has a word, so everyone means the same thing by a 3.
+const STAR_WORDS = {
+  seat: ['Not worth it', 'Meh', 'Okay', 'Nice', 'Lovely'],
+  toilet: ['Avoid', 'Grim', 'Okay', 'Clean', 'Spotless'],
+};
+const starWords = kind => (kind === 'toilet' ? STAR_WORDS.toilet : STAR_WORDS.seat);
+// Toilets can also be marked closed, which isn't a grade.
+const CLOSED = 'closed';
+// Score bands used for the map and filters (on averages later, on your own stars for now).
+const LOVELY_FROM = 4.5, NICE_FROM = 3.5;
+const isLovely = sc => typeof sc === 'number' && sc >= LOVELY_FROM;
+const isNice = sc => typeof sc === 'number' && sc >= NICE_FROM && sc < LOVELY_FROM;
+const isLow = r => r === CLOSED || (typeof r === 'number' && r <= 2);
+// Ratings saved by earlier versions used words; turn them into stars.
+const OLD_RATINGS = { lovely: 5, okay: 3, notgreat: 2, clean: 4, avoid: 1 };
+function normRating(r) {
+  if (r === CLOSED || typeof r === 'number') return r;
+  if (typeof r === 'string' && /^[1-5]$/.test(r)) return Number(r);
+  return OLD_RATINGS[r] || null;
+}
+function ratingWord(r, kind) {
+  r = normRating(r);
+  if (r === CLOSED) return 'Closed or locked';
+  return r ? starWords(kind)[r - 1] : '';
+}
+const starText = n => `${n} ${n === 1 ? 'star' : 'stars'}`;
+// "Still 4 stars?" or "Still closed?"
+function stillQuestion(r) {
+  r = normRating(r);
+  return r === CLOSED ? 'Still closed?' : `Still ${starText(r)}?`;
+}
+
+// What makes a spot nice, beyond the stars. One optional tap after rating.
+const SPOT_TAGS = [['view', 'View'], ['quiet', 'Quiet'], ['sunset', 'Sunset'], ['fortwo', 'For two'], ['shade', 'Shade'], ['sun', 'Sunny'], ['picnic', 'Picnics'], ['kids', 'Kids']];
+const tagLabel = id => (SPOT_TAGS.find(t => t[0] === id) || [, id])[1];
+
+// Each raccoon's voice: short lines for its moods and for what happens at a spot.
+const VOICES = {
+  pip: {
+    hungry: 'Crumbs? Any crumbs? I’ll take any crumbs.', happy: 'Best day ever. Again.',
+    lovely: 'Five stars! I was here first, remember that.', low: 'Not every bench can be a winner. The crumbs were fine though.',
+    golden: 'Golden! I always knew I was lucky.', trinket: 'Ooh, shiny. Mine now.' },
+  rusty: {
+    hungry: 'I can smell a croissant three neighbourhoods away. Let’s go.', happy: 'Full of snacks and dreaming of more.',
+    lovely: 'This spot deserves a croissant. Possibly two.', low: 'Even the pigeons skip this one.',
+    golden: 'A golden snack! My nose never lies.', trinket: 'Fancy. Does it go with crumbs?' },
+  midnight: {
+    hungry: 'I’m not hungry. I’m strategically empty.', happy: 'Fine. That was acceptable.',
+    lovely: 'Hm. I’d sit here. Don’t tell anyone.', low: 'I’ve seen better benches in my sleep.',
+    golden: 'Golden. Quietly impressive.', trinket: 'Nobody saw me take it.' },
+  biscuit: {
+    hungry: 'I’d trade my tail for a cookie right now.', happy: 'Cozy, crumby and content.',
+    lovely: 'Perfect for a picnic. And a nap. And a cookie.', low: 'This one needs a cookie to cheer it up.',
+    golden: 'A golden treat! Today is a sweet day.', trinket: 'Is it edible? No? Still lovely.' },
+  fluff: {
+    hungry: 'My fur is fluffy but my belly is flat.', happy: 'Maximum fluff, maximum snacks.',
+    lovely: 'This view makes my fur stand on end. In a good way.', low: 'My fur is unimpressed.',
+    golden: 'Golden! I’m fluffing with joy.', trinket: 'Something to wear in all this fur!' },
+  hazel: {
+    hungry: 'I know a shortcut to a snack. Follow me.', happy: 'Another corner of the map, explored.',
+    lovely: 'Worth every shortcut it took to get here.', low: 'Noted. We’ll take a different route next time.',
+    golden: 'A golden find, right where the map got interesting.', trinket: 'A souvenir from the road!' },
+  pepper: {
+    hungry: 'Snacks first, shiny things second. Okay, both.', happy: 'Full belly, full collection.',
+    lovely: 'This spot sparkles. I approve.', low: 'Not a single thing glitters here.',
+    golden: 'It glitters and it’s edible. The best kind of treasure.', trinket: 'Into the collection it goes!' },
+  sage: {
+    hungry: 'A wise raccoon knows when it’s snack time. It’s now.', happy: 'Contentment is a good bench and a full belly.',
+    lovely: 'Now this is a view worth sitting for.', low: 'In all my years, I have rarely sat on worse.',
+    golden: 'Golden. Patience is always rewarded.', trinket: 'A fine addition for a raccoon of my age.' },
+  coco: {
+    hungry: 'My grin is getting smaller. Feed me?', happy: 'Too full to move. Perfect.',
+    lovely: 'Big grin. Big nap. Big five stars.', low: 'Even I can’t grin about this one.',
+    golden: 'Golden! Biggest grin yet.', trinket: 'Ooh, does this make me look dapper?' },
+  nimbus: {
+    hungry: 'Tiny raccoon, tiny belly, big hunger.', happy: 'Floating on a cloud of crumbs.',
+    lovely: 'So soft, so sunny, so lovely.', low: 'This one made my cloud go grey.',
+    golden: 'A golden crumb! I’m glowing.', trinket: 'Something sparkly for a small raccoon!' },
+};
+const voiceOf = (id, situation) => ((VOICES[id] || VOICES.pip)[situation]) || '';
+
+/* ---------- rules ---------- */
+
+// Small, fast string hash (FNV-1a). Same input, same number, on every phone and on the server.
+function hash32(s) {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return h >>> 0;
+}
+function dayKey(d) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+// Today's snack at a spot is the same for everyone.
+function snackFor(spotId, day) {
+  const [emoji, name] = SNACKS[hash32(spotId + '|' + day) % SNACKS.length];
+  const rare = hash32('rare|' + day + '|' + spotId) % GAME.rareOneIn === 0;
+  return { emoji, name, rare };
+}
+// Monday 00:00 of the week containing t (local time).
+function weekStart(t) {
+  const d = new Date(t);
+  d.setHours(0, 0, 0, 0);
+  d.setDate(d.getDate() - ((d.getDay() + 6) % 7));
+  return d;
+}
+// Consecutive weeks (Monday to Sunday) with at least one visit. This week counts once it has a visit;
+// until then, a streak that reached last week is still alive.
+function streakOf(times, now) {
+  const weeks = new Set(times.map(t => dayKey(weekStart(t))));
+  const cur = weekStart(now);
+  const thisWeek = weeks.has(dayKey(cur));
+  const cursor = new Date(cur);
+  if (!thisWeek) cursor.setDate(cursor.getDate() - 7);
+  let n = 0;
+  while (weeks.has(dayKey(cursor))) { n++; cursor.setDate(cursor.getDate() - 7); }
+  return { weeks: n, thisWeek };
+}
+// What rating a new spot gives. Return visits give nothing, so people rate many different spots.
+// newSpotTimes and owned describe the person before this check-in.
+function rollCheckin(spotId, now, newSpotTimes, owned) {
+  const day = dayKey(new Date(now));
+  const snack = snackFor(spotId, day);
+  const st = streakOf(newSpotTimes, now);
+  const streakBonus = !st.thisWeek && st.weeks >= 1 ? GAME.streakBonus : 0;
+  let trinket = null;
+  if (hash32('trinket|' + day + '|' + spotId) % GAME.trinketOneIn === 0) {
+    const left = TRINKETS.filter(x => !owned.includes(x.id));
+    if (left.length) trinket = left[hash32('pick|' + day + '|' + spotId) % left.length].id;
+  }
+  const value = (snack.rare ? GAME.rareValue : GAME.newSpotValue) + streakBonus;
+  return { snack, trinket, streakBonus, value, first: true };
+}
+
+// Everything about a person is computed from their history of events,
+// so the same history can later be uploaded to the server as it is.
+// Rating a new toilet: one plain snack, no golden snacks, trinkets or streak bonus.
+function rollToilet(spotId, now) {
+  const s = snackFor(spotId, dayKey(new Date(now)));
+  return { snack: { emoji: s.emoji, name: s.name, rare: false }, trinket: null, streakBonus: 0, value: GAME.toiletValue, first: true };
+}
+
+function deriveState(events) {
+  const s = {
+    raccoon: null, name: '', companion: null, total: 0, rares: 0, lastFed: 0,
+    visits: [], ratings: [], notes: [], newSpots: [], pins: [], adds: [], trinkets: [], worn: { head: null, face: null, neck: null },
+  };
+  const removed = new Set(events.filter(e => e.type === 'remove').map(e => e.id));
+  for (const e of events) {
+    if (e.type === 'profile') {
+      if (e.raccoon) s.raccoon = e.raccoon;
+      if (e.name != null) s.name = e.name;
+      // Older histories that chose a raccoon had the companion on.
+      if (e.raccoon && s.companion === null) s.companion = true;
+    } else if (e.type === 'companion') {
+      s.companion = !!e.on;
+    } else if (e.type === 'checkin') {
+      s.visits.push(e);
+      if (e.rating) s.ratings.push(Object.assign({}, e, { rating: normRating(e.rating) }));
+      if ((e.first || e.value) && e.kind !== 'toilet') s.newSpots.push(e.t);
+      s.total += e.value || 0;
+      if (e.rare) s.rares += 1;
+      if (e.value) s.lastFed = Math.max(s.lastFed, e.t);
+      if (e.trinket && !s.trinkets.includes(e.trinket)) s.trinkets.push(e.trinket);
+    } else if (e.type === 'add') {
+      s.adds.push(e);
+      if (removed.has(e.id)) continue;
+      s.pins.push(e);
+      s.visits.push(e);
+      s.newSpots.push(e.t);
+      if (e.rating) s.ratings.push(Object.assign({}, e, { rating: normRating(e.rating) }));
+      s.total += e.value || 0;
+      s.lastFed = Math.max(s.lastFed, e.t);
+    } else if (e.type === 'legacy') {
+      s.total += e.value || 0;
+    } else if (e.type === 'rate') {
+      s.ratings.push(Object.assign({}, e, { rating: normRating(e.rating) }));
+    } else if (e.type === 'vote') {
+      // Likes and dislikes from earlier versions become ratings.
+      const rating = e.v === 1 ? 5 : e.v === -1 ? 2 : null;
+      if (rating) s.ratings.push(Object.assign({}, e, { rating }));
+    } else if (e.type === 'tags') {
+      s.notes.push(e);
+    } else if (e.type === 'wear') {
+      s.worn[e.slot] = e.item || null;
+    }
+  }
+  return s;
+}
+
+// Passport stamps: one per town, or per district in big cities, grouped by country.
+// Stamps show the neighbourhood where it's officially mapped, otherwise the district, otherwise the town.
+// Some countries map their finest level too finely for stamps, so it's capped there.
+const PLACE_MAX_LEVEL = { HR: 9 };   // Croatia: level 10 is Zagreb's many small local committees
+function placeParts(place) {
+  const max = PLACE_MAX_LEVEL[place.code] || 10;
+  const sub = (max >= 10 && place.neighbourhood) || place.district || '';
+  return { town: place.town, sub };
+}
+function stampLabel(place) {
+  const p = placeParts(place);
+  return p.sub ? `${p.town}, ${p.sub}` : p.town;
+}
+function passportOf(visits) {
+  const countries = new Map();
+  for (const e of visits) {
+    if (!e.place || !e.place.town || e.kind === 'toilet') continue;
+    const c = e.place.country || 'Somewhere';
+    const label = stampLabel(e.place);
+    if (!countries.has(c)) countries.set(c, new Map());
+    const m = countries.get(c);
+    if (!m.has(label)) m.set(label, { label, town: e.place.town, district: placeParts(e.place).sub, first: e.t, spots: new Set() });
+    const st = m.get(label);
+    st.first = Math.min(st.first, e.t);
+    st.spots.add(e.spot || e.id);
+  }
+  return [...countries].map(([country, m]) => ({
+    country,
+    stamps: [...m.values()].sort((a, b) => a.first - b.first).map(x => Object.assign({}, x, { spots: x.spots.size })),
+  })).sort((a, b) => a.stamps[0].first - b.stamps[0].first);
+}
+
+function stageOf(total) {
+  let i = 0;
+  while (i + 1 < STAGES.length && total >= STAGES[i + 1].at) i++;
+  const next = STAGES[i + 1] || null;
+  return Object.assign({}, STAGES[i], { next, toNext: next ? next.at - total : 0 });
+}
+function moodOf(lastFed, now) {
+  if (!lastFed) return { key: 'hungry', label: 'Hungry and waiting for its first snack' };
+  const day = t => new Date(t).setHours(0, 0, 0, 0);
+  const days = Math.round((day(now) - day(lastFed)) / 86400000);
+  if (days <= 0) return { key: 'happy', label: 'Full and happy' };
+  if (days <= 2) return { key: 'content', label: 'Content' };
+  if (days <= 6) return { key: 'peckish', label: 'Getting peckish' };
+  return { key: 'hungry', label: `Hungry, last fed ${days} days ago` };
+}
+
+/* ---------- drawings ---------- */
+
+function trinketSVG(id) {
+  switch (id) {
+    case 'strawhat': return `
+      <ellipse cx="110" cy="49" rx="50" ry="10" fill="#D9B46A"/>
+      <path d="M84 49 C84 26 136 26 136 49 Z" fill="#E6C98A"/>
+      <rect x="84.5" y="40" width="51" height="7" fill="#C0504D"/>
+      <path d="M62 49 q48 9 96 0" stroke="#C59E55" stroke-width="2" fill="none"/>`;
+    case 'cap': return `
+      <path d="M74 54 C74 22 146 22 146 54 Z" fill="#3B6EA8"/>
+      <ellipse cx="136" cy="54" rx="28" ry="6.5" fill="#2C5687"/>
+      <path d="M110 25 v29 M92 30 q6 12 6 24 M128 30 q-6 12 -6 24" stroke="#2C5687" stroke-width="1.5" fill="none"/>
+      <circle cx="110" cy="25" r="3.5" fill="#2C5687"/>`;
+    case 'flowers': {
+      const pts = [[72, 56], [84, 46], [97, 41], [110, 39], [123, 41], [136, 46], [148, 56]];
+      const cols = ['#E8789A', '#F2C94C', '#9AD0EC', '#E8789A', '#F2C94C', '#9AD0EC', '#E8789A'];
+      return `<path d="M68 60 Q110 28 152 60" stroke="#5E8C4A" stroke-width="3" fill="none"/>` + pts.map(([x, y], i) => `
+        <g transform="translate(${x} ${y})">
+          ${[0, 72, 144, 216, 288].map(a => `<ellipse cx="0" cy="-4.5" rx="3.2" ry="4.5" transform="rotate(${a})" fill="${cols[i]}"/>`).join('')}
+          <circle r="2.6" fill="#FFF3C4"/>
+        </g>`).join('');
+    }
+    case 'sunglasses': return `
+      <rect x="70" y="69" width="35" height="19" rx="8" fill="#151515" stroke="#E9E4DA" stroke-width="2"/>
+      <rect x="115" y="69" width="35" height="19" rx="8" fill="#151515" stroke="#E9E4DA" stroke-width="2"/>
+      <path d="M105 75 q5 -4 10 0" stroke="#E9E4DA" stroke-width="3" fill="none"/>
+      <path d="M76 73 l8 0 M121 73 l8 0" stroke="#FFFFFF" stroke-opacity=".55" stroke-width="2.2" stroke-linecap="round"/>`;
+    case 'glasses': return `
+      <circle cx="88" cy="78" r="13" fill="#FFFFFF" fill-opacity=".14" stroke="#C9A227" stroke-width="2.6"/>
+      <circle cx="132" cy="78" r="13" fill="#FFFFFF" fill-opacity=".14" stroke="#C9A227" stroke-width="2.6"/>
+      <path d="M101 77 q9 -6 18 0" stroke="#C9A227" stroke-width="2.6" fill="none"/>`;
+    case 'scarf': return `
+      <rect x="72" y="111" width="76" height="15" rx="7.5" fill="#C0504D"/>
+      <path d="M118 120 l14 0 l3 26 l-14 2 z" fill="#C0504D"/>
+      <path d="M121 140 l13 -2 M120 134 l13 -2" stroke="#F2EEE7" stroke-width="2"/>
+      <path d="M80 113 v11 M92 112 v13 M104 112 v13" stroke="#A33F3C" stroke-width="2"/>`;
+    case 'bandana': return `
+      <path d="M74 111 L146 111 L110 142 Z" fill="#3B6EA8"/>
+      <rect x="72" y="108" width="76" height="7" rx="3.5" fill="#2C5687"/>
+      ${[[96, 119], [110, 120], [124, 119], [103, 128], [117, 128], [110, 135]].map(([x, y]) => `<circle cx="${x}" cy="${y}" r="1.8" fill="#FFFFFF"/>`).join('')}`;
+    case 'bowtie': return `
+      <path d="M93 109 L110 117 L93 126 Z" fill="#6B4C9A"/>
+      <path d="M127 109 L110 117 L127 126 Z" fill="#6B4C9A"/>
+      <rect x="105" y="112" width="10" height="10" rx="3" fill="#563A80"/>`;
+    default: return '';
+  }
+}
+
+// opts: { scale, mood, holding, look, worn: {head, face, neck}, viewBox }
+function raccoonSVG(opts) {
+  const o = Object.assign({ scale: 1, mood: 'content', holding: '', look: RACCOONS[0], worn: {}, viewBox: '0 0 220 200' }, opts);
+  const L = o.look, scale = o.scale, mood = o.mood;
+  const x = new Set(L.extras || []);
+  const pupil = '#1F1C1A';
+  const bx = 110;
+
+  // Body shape
+  const B = { classic: [50, 38, 146], chubby: [57, 41, 147], slim: [43, 43, 144], tiny: [42, 32, 152] }[L.body] || [50, 38, 146];
+  const rx = B[0] * scale, ry = B[1] + (scale - 1) * 14, by = B[2];
+  const footY = by + ry - 2;
+  const pawCol = x.has('socks') ? L.light : x.has('pinkPaws') ? '#E8B4BC' : L.paw;
+
+  // Tail
+  const T = {
+    classic: { pts: [[183, 95], [179, 108], [173, 121], [165, 133], [156, 145], [146, 156]], r: [15, 13] },
+    bushy: { pts: [[188, 90], [184, 104], [177, 118], [168, 131], [158, 143], [147, 155]], r: [20, 17] },
+    thin: { pts: [[184, 92], [181, 101], [177, 110], [172, 119], [166, 127], [159, 135], [152, 143], [144, 151], [136, 158]], r: [13, 9] },
+    broad: { pts: [[183, 97], [176, 116], [165, 133], [151, 149]], r: [17, 16] },
+  }[L.tail] || null;
+  const tail = T.pts.map(([px, py], i) =>
+    `<ellipse cx="${px}" cy="${py}" rx="${T.r[0]}" ry="${T.r[1]}" transform="rotate(-55 ${px} ${py})" fill="${i % 2 === 0 ? L.band : L.tail2}"/>`).join('');
+
+  // Ears
+  const classicEar = (cx, rot) => `<ellipse cx="${cx}" cy="45" rx="13" ry="17" transform="rotate(${rot} ${cx} 45)" fill="${L.fur}"/>
+    <ellipse cx="${cx}" cy="47" rx="7" ry="10" transform="rotate(${rot} ${cx} 47)" fill="${L.paw}"/>`;
+  let ears;
+  if (L.ears === 'pointy') {
+    ears = [[76, -18], [144, 18]].map(([cx, r]) => `
+      <ellipse cx="${cx}" cy="40" rx="11" ry="22" transform="rotate(${r} ${cx} 40)" fill="${L.fur}"/>
+      <ellipse cx="${cx}" cy="43" rx="5.5" ry="13" transform="rotate(${r} ${cx} 43)" fill="${L.paw}"/>
+      <ellipse cx="${cx + (r < 0 ? -6 : 6)}" cy="22" rx="5" ry="6" transform="rotate(${r} ${cx + (r < 0 ? -6 : 6)} 22)" fill="${L.band}"/>`).join('');
+  } else if (L.ears === 'round') {
+    ears = `<circle cx="80" cy="51" r="12" fill="${L.fur}"/><circle cx="80" cy="52" r="6.5" fill="${L.paw}"/>
+      <circle cx="140" cy="51" r="12" fill="${L.fur}"/><circle cx="140" cy="52" r="6.5" fill="${L.paw}"/>`;
+  } else if (L.ears === 'floppy') {
+    // Left ear up, right ear flopped over sideways
+    ears = classicEar(79, -25) + `
+      <ellipse cx="149" cy="54" rx="12" ry="17" transform="rotate(68 149 54)" fill="${L.fur}"/>
+      <ellipse cx="150" cy="54" rx="6.5" ry="10" transform="rotate(68 150 54)" fill="${L.paw}"/>`;
+  } else {
+    ears = classicEar(79, -25) + classicEar(141, 25) +
+      (L.ears === 'tufts' ? `<path d="M68 33 l-4 -13 l11 9 z M152 33 l4 -13 l-11 9 z" fill="${L.band}"/>` : '');
+  }
+
+  // Fluffy ruff around the face: a ring of soft scallops behind the head
+  const mane = x.has('mane') ? Array.from({ length: 20 }, (_, i) => {
+    const a = (i / 20) * Math.PI * 2;
+    return `<circle cx="${(110 + Math.cos(a) * 47).toFixed(1)}" cy="${(86 + Math.sin(a) * 40).toFixed(1)}" r="11" fill="${L.tail2}"/>`;
+  }).join('') : '';
+
+  // Head-top details (hats cover them, which is fine)
+  let top = '';
+  if (x.has('cowlick')) top += `<path d="M104 47 q-3 -9 3 -13 M110 46 q0 -11 7 -13 M116 47 q4 -8 9 -8" stroke="${L.fur}" stroke-width="4.5" fill="none" stroke-linecap="round"/>`;
+  if (x.has('spiky')) top += `<path d="M98 50 l3 -15 l6 11 l3 -16 l3 16 l6 -11 l3 15 z" fill="${L.fur}"/>`;
+  if (x.has('curl')) top += `<path d="M110 46 c-1 -9 10 -11 10 -3 c0 5 -7 5 -6 0" stroke="${L.fur}" stroke-width="4" fill="none" stroke-linecap="round"/>`;
+
+  // Forehead
+  let forehead = `<ellipse cx="110" cy="58" rx="6" ry="14" fill="${L.band}"/>`;
+  if (x.has('blaze')) forehead = `<ellipse cx="110" cy="60" rx="5" ry="15" fill="${L.light}"/>`;
+  if (x.has('crescent')) forehead = `<path d="M103 52 a8 8 0 1 0 14 0 a6.5 6.5 0 1 1 -14 0 z" fill="${L.light}"/>`;
+  const brows = x.has('brows')
+    ? `<path d="M73 66 q13 -9 26 -2 M121 64 q13 -7 26 2" stroke="${L.light}" stroke-width="6" fill="none" stroke-linecap="round"/>` : '';
+
+  // Eyes, by mood and eye style
+  const style = L.eyes || 'normal';
+  const lashes = style === 'lashes'
+    ? `<path d="M80 72 l-4 -4 M83 70 l-2 -5 M140 72 l4 -4 M137 70 l2 -5" stroke="${L.light}" stroke-width="2" stroke-linecap="round"/>` : '';
+  let eyes, mouth;
+  if (mood === 'happy') {
+    eyes = `<path d="M81 80 q7 -7 14 0 M125 80 q7 -7 14 0" stroke="${L.light}" stroke-width="3" fill="none" stroke-linecap="round"/>` + lashes;
+    mouth = `<path d="M100 101 q10 9 20 0" stroke="${L.mask}" stroke-width="2.5" fill="none" stroke-linecap="round"/>`;
+  } else {
+    const big = mood === 'hungry';
+    const r = big ? 7 : style === 'sparkle' ? 6.5 : 5.5;
+    const pr = big ? 4.2 : 3.2;
+    const py = big ? 76 : 78.5;
+    const eye = cx => {
+      let s = `<circle cx="${cx}" cy="78" r="${r}" fill="${L.light}"/>`;
+      if (style === 'amber') s += `<circle cx="${cx}" cy="${py}" r="${pr + 1.3}" fill="#D9932B"/>`;
+      s += `<circle cx="${cx}" cy="${py}" r="${style === 'amber' ? pr - 0.6 : pr}" fill="${pupil}"/>`;
+      s += `<circle cx="${cx + 1.4}" cy="${py - 1.5}" r="${style === 'sparkle' ? 1.8 : 1.2}" fill="#fff"/>`;
+      if (style === 'sparkle') s += `<circle cx="${cx - 1.8}" cy="${py + 1.6}" r="0.9" fill="#fff"/>`;
+      if (style === 'sleepy') s += `<path d="M${cx - r - 1} ${78 - r - 1} h${2 * r + 2} v${r + (big ? -1 : 1)} h-${2 * r + 2} z" fill="${L.mask}"/>
+        <path d="M${cx - r} ${78 + (big ? -1 : 1)} h${2 * r}" stroke="${L.light}" stroke-width="1.4" stroke-linecap="round"/>`;
+      return s;
+    };
+    eyes = eye(88) + eye(132) + lashes;
+    if (mood === 'peckish') eyes += `<path d="M81 70 l12 3 M139 70 l-12 3" stroke="${L.light}" stroke-width="2.2" stroke-linecap="round"/>`;
+    mouth = mood === 'hungry' ? `<ellipse cx="110" cy="104" rx="3.5" ry="4" fill="${L.mask}"/>`
+      : mood === 'peckish' ? `<path d="M103 102 h14" stroke="${L.mask}" stroke-width="2.5" stroke-linecap="round"/>`
+      : `<path d="M103 101 q7 5 14 0" stroke="${L.mask}" stroke-width="2.5" fill="none" stroke-linecap="round"/>`;
+  }
+  const teeth = x.has('teeth') && mood !== 'hungry'
+    ? `<rect x="105.2" y="${mood === 'happy' ? 104.5 : 103}" width="4.4" height="5" rx="1.2" fill="#FFFFFF" stroke="${L.band}" stroke-width=".6"/>
+       <rect x="110.4" y="${mood === 'happy' ? 104.5 : 103}" width="4.4" height="5" rx="1.2" fill="#FFFFFF" stroke="${L.band}" stroke-width=".6"/>` : '';
+  const nose = x.has('pinkNose') ? '#D9798B' : L.mask;
+  const freckles = x.has('freckles')
+    ? [[100, 100], [97, 104], [103, 105], [120, 100], [123, 104], [117, 105]].map(([fx, fy]) => `<circle cx="${fx}" cy="${fy}" r="1.3" fill="${L.band}"/>`).join('') : '';
+  const blush = x.has('blush') ? `<ellipse cx="72" cy="97" rx="8" ry="4.5" fill="#E89AA6" opacity=".65"/><ellipse cx="148" cy="97" rx="8" ry="4.5" fill="#E89AA6" opacity=".65"/>` : '';
+  const whiskers = x.has('whiskers')
+    ? `<path d="M91 96 l-22 -4 M91 100 l-22 2 M129 96 l22 -4 M129 100 l22 2" stroke="${L.band}" stroke-width="1.3" stroke-linecap="round"/>` : '';
+  const earring = x.has('earring') ? `<circle cx="70" cy="58" r="3" fill="#E3B43B" stroke="#B8860B" stroke-width="1"/>` : '';
+  const speckles = x.has('speckles')
+    ? [[-34, -18], [-38, 4], [-26, 22], [32, -16], [38, 6], [26, 24], [-14, -30], [16, -30]].map(([dx, dy]) =>
+      `<circle cx="${bx + dx * scale}" cy="${by + dy}" r="2.2" fill="${L.band}" opacity=".45"/>`).join('') : '';
+  const bellyW = 31 * scale * (L.body === 'chubby' ? 1.12 : L.body === 'slim' || L.body === 'tiny' ? 0.88 : 1);
+  const bellyH = 26 + (scale - 1) * 10 - (L.body === 'tiny' ? 5 : 0);
+  const belly = x.has('heartBelly')
+    ? `<path d="M${bx} ${by + 26} C ${bx - bellyW * 1.3} ${by + 4}, ${bx - bellyW * 0.9} ${by - 22}, ${bx} ${by - 8} C ${bx + bellyW * 0.9} ${by - 22}, ${bx + bellyW * 1.3} ${by + 4}, ${bx} ${by + 26} Z" fill="${L.belly}"/>`
+    : `<ellipse cx="${bx}" cy="${by + 7}" rx="${bellyW}" ry="${bellyH}" fill="${L.belly}"/>`;
+  const snack = o.holding ? `<text x="${bx}" y="${by + 4}" font-size="26" text-anchor="middle" dominant-baseline="middle">${o.holding}</text>` : '';
+  const worn = o.worn || {};
+  return `<svg viewBox="${o.viewBox}" role="img" aria-label="${L.name}, ${mood}">
+    ${tail}
+    <ellipse cx="${bx - 28 * scale}" cy="${footY}" rx="13" ry="7" fill="${pawCol}"/>
+    <ellipse cx="${bx + 28 * scale}" cy="${footY}" rx="13" ry="7" fill="${pawCol}"/>
+    <ellipse cx="${bx}" cy="${by}" rx="${rx}" ry="${ry}" fill="${L.fur}"/>
+    ${speckles}
+    ${belly}
+    ${snack}
+    <ellipse cx="${bx - 24 * scale}" cy="${by}" rx="7" ry="11" transform="rotate(-25 ${bx - 24 * scale} ${by})" fill="${pawCol}"/>
+    <ellipse cx="${bx + 24 * scale}" cy="${by}" rx="7" ry="11" transform="rotate(25 ${bx + 24 * scale} ${by})" fill="${pawCol}"/>
+    ${mane}
+    ${ears}
+    ${earring}
+    ${top}
+    <ellipse cx="110" cy="82" rx="46" ry="38" fill="${L.fur}"/>
+    <ellipse cx="70" cy="96" rx="12" ry="10" fill="${L.tail2}"/><ellipse cx="150" cy="96" rx="12" ry="10" fill="${L.tail2}"/>
+    <ellipse cx="90" cy="63" rx="14" ry="7" fill="${L.light}"/>
+    <ellipse cx="130" cy="63" rx="14" ry="7" fill="${L.light}"/>
+    ${forehead}
+    ${brows}
+    <ellipse cx="88" cy="79" rx="19" ry="12" fill="${L.mask}"/>
+    <ellipse cx="132" cy="79" rx="19" ry="12" fill="${L.mask}"/>
+    <ellipse cx="110" cy="78" rx="10" ry="8" fill="${L.mask}"/>
+    ${blush}
+    <ellipse cx="110" cy="97" rx="20" ry="14" fill="${L.light}"/>
+    ${whiskers}
+    ${freckles}
+    <ellipse cx="110" cy="90" rx="6" ry="4.5" fill="${nose}"/>
+    ${eyes}
+    ${mouth}
+    ${teeth}
+    ${worn.neck ? trinketSVG(worn.neck) : ''}
+    ${worn.face ? trinketSVG(worn.face) : ''}
+    ${worn.head ? trinketSVG(worn.head) : ''}
+  </svg>`;
+}
+// A trinket on its own, cropped from a raccoon head, for the wardrobe tiles.
+const SLOT_VIEW = { head: '56 12 108 62', face: '62 56 96 44', neck: '62 98 96 54' };
+function trinketTileSVG(id, look) {
+  const t = TRINKETS.find(x => x.id === id);
+  return raccoonSVG({ look, mood: 'content', worn: { [t.slot]: id }, viewBox: SLOT_VIEW[t.slot] });
+}
+
+// A round passport stamp. The angle and ink colour come from the place name, so they never change.
+function stampSVG(stamp, uid) {
+  const inks = ['#2F5A8A', '#B2453E', '#2F6B4A', '#6B4C9A', '#8A5A2B'];
+  const h = hash32(stamp.label);
+  const ink = inks[h % inks.length];
+  const rot = (h % 25) - 12;
+  const top = stamp.town.toUpperCase();
+  const fs = top.length > 16 ? 8.5 : top.length > 11 ? 10 : 11.5;
+  const date = new Date(stamp.first).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
+  const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  let mid;
+  if (!stamp.district) {
+    mid = `<text x="60" y="59" text-anchor="middle" font-size="14" fill="${ink}">★</text>`;
+  } else if (stamp.district.length <= 12) {
+    mid = `<text x="60" y="58" text-anchor="middle" font-size="12" font-weight="700" fill="${ink}">${esc(stamp.district)}</text>`;
+  } else {
+    // Long district names go on two lines, split at the space nearest the middle.
+    const words = stamp.district.split(' ');
+    let best = 1, bestDiff = Infinity;
+    for (let i = 1; i < words.length; i++) {
+      const diff = Math.abs(words.slice(0, i).join(' ').length - words.slice(i).join(' ').length);
+      if (diff < bestDiff) { bestDiff = diff; best = i; }
+    }
+    const lines = words.length > 1 ? [words.slice(0, best).join(' '), words.slice(best).join(' ')] : [stamp.district];
+    const size = Math.max(...lines.map(l => l.length)) > 13 ? 7.5 : 9;
+    mid = lines.map((l, i) => `<text x="60" y="${lines.length > 1 ? 50 + i * 10 : 58}" text-anchor="middle" font-size="${size}" font-weight="700" fill="${ink}">${esc(l)}</text>`).join('');
+  }
+  return `<svg viewBox="0 0 120 120" role="img" aria-label="${esc(stamp.label)}, first visit ${esc(date)}">
+    <g transform="rotate(${rot} 60 60)" opacity=".88" font-family="IBM Plex Sans, Helvetica, Arial, sans-serif">
+      <circle cx="60" cy="60" r="54" fill="none" stroke="${ink}" stroke-width="3"/>
+      <circle cx="60" cy="60" r="38" fill="none" stroke="${ink}" stroke-width="1.2"/>
+      <path id="arc-${uid}" d="M 16 60 A 44 44 0 0 1 104 60" fill="none"/>
+      <text font-size="${fs}" font-weight="700" letter-spacing="1" fill="${ink}">
+        <textPath href="#arc-${uid}" startOffset="50%" text-anchor="middle">${esc(top)}</textPath>
+      </text>
+      ${mid}
+      <text x="60" y="72" text-anchor="middle" font-size="8.5" fill="${ink}">${esc(date)}</text>
+      <text x="60" y="84" text-anchor="middle" font-size="8.5" fill="${ink}">${stamp.spots} ${stamp.spots === 1 ? 'spot' : 'spots'}</text>
+    </g>
+  </svg>`;
+}
+</script>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+/* ============================================================
+   Interface
+   ============================================================ */
+(function () {
+  const $ = s => document.querySelector(s);
+  const ZURICH = { lat: 47.3686, lon: 8.5392 };
+  const PAGE = 20;
+  const ENDPOINTS = [
+    'https://overpass-api.de/api/interpreter',
+    'https://maps.mail.ru/osm/tools/overpass/api/interpreter',
+    'https://overpass.private.coffee/api/interpreter',
+  ];
+  const EVENTS_KEY = 'pause.events.v1';
+  const TEST = new URLSearchParams(location.search).has('test');   // open with ?test to check in without being there
+  const KIND_LABEL = { bench: 'Bench', table: 'Picnic table', toilet: 'Toilet' };
+  const ICON_LIKE = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>';
+  const ICON_DISLIKE = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3zm7-13h2.67A2.31 2.31 0 0 1 22 4v7a2.31 2.31 0 0 1-2.33 2H17"/></svg>';
+
+  const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const wide = matchMedia('(min-width: 900px)');
+  const css = name => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  const colorOf = k => css(k === 'bench' ? '--bench' : k === 'table' ? '--table' : '--toilet');
+  const esc = s => String(s).replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
+  const km = r => r >= 1000 ? (r / 1000) + ' km' : r + ' m';
+
+  const state = {
+    phase: 'idle',          // idle | locating | loading | ready | error
+    center: null, place: '', radius: SEARCH_RADIUS,
+    spots: [], shown: PAGE, selected: null,
+    mode: 'peek',           // peek | list | detail | raccoon | add
+    rtab: 'raccoon', picking: false, pickSel: null,
+    rateTab: 'lovely', votedList: [], pendingOpen: null, user: null, rateFor: null,
+    sortBy: 'near', intro: 0,
+    ckMsg: '', checking: false, reveal: null,
+    pending: 0, failedN: 0,
+    add: { kind: 'bench', backrest: '', rating: '', msg: '', near: null, done: null, busy: false, step: 'form', fix: null, pin: null },
+    error: '',
+    types: { bench: true, table: true, toilet: true },
+    need: { liked: false, nice: false, sunset: false, water: false, green: false, quiet: false, visited: false },
+    sunsetHidden: '',
+  };
+  let searchToken = 0;
+
+  /* ---------- your history, saved on this device for now ----------
+     Every check-in, vote, new pin and choice is one event with a time and coordinates.
+     Totals, the raccoon, trinkets, streaks and stamps are all calculated from this history,
+     so it can later be uploaded to the server exactly as it is. */
+  let events = loadEvents();
+  let me = deriveState(events);
+  let links = { visits: new Map(), ratings: new Map(), notes: new Map() };
+
+  function loadEvents() {
+    try {
+      const saved = JSON.parse(localStorage.getItem(EVENTS_KEY));
+      if (Array.isArray(saved)) return saved;
+    } catch (e) { /* fall through */ }
+    return migrateOldData();
+  }
+  function saveEvents() {
+    try { localStorage.setItem(EVENTS_KEY, JSON.stringify(events)); } catch (e) { /* private mode: lasts for this visit */ }
+  }
+  function record(e) {
+    events.push(e);
+    saveEvents();
+    me = deriveState(events);
+    linkEvents();
+    updateRaccoonButton();
+    return e;
+  }
+  // Earlier versions saved votes, the raccoon and pins separately; turn them into history once.
+  function migrateOldData() {
+    const out = [];
+    try {
+      const g = JSON.parse(localStorage.getItem('pause.raccoon.v1') || 'null');
+      const v = JSON.parse(localStorage.getItem('pause.votes.v1') || 'null');
+      const pins = JSON.parse(localStorage.getItem('pause.added.v1') || 'null') || [];
+      let counted = 0;
+      if (g) {
+        if (g.name) out.push({ type: 'profile', t: 0, name: g.name });
+        const seen = new Set();
+        for (const e of g.log || []) {
+          if (e.added) continue;
+          const vis = (g.visits || {})[e.id] || {};
+          out.push({ type: 'checkin', t: e.t, spot: e.id, lat: vis.lat, lon: vis.lon, emoji: e.emoji, name: e.name, rare: !!e.rare,
+            value: e.value || 0, first: !!e.first, where: e.where || '', place: null });
+          counted += e.value || 0;
+          seen.add(e.id);
+        }
+        for (const [id, vis] of Object.entries(g.visits || {})) {
+          if (id.startsWith('user/') || seen.has(id)) continue;
+          out.push({ type: 'checkin', t: vis.lastTs || 0, spot: id, lat: vis.lat, lon: vis.lon, value: 0, legacy: true, place: null });
+        }
+      }
+      for (const p of pins) {
+        out.push({ type: 'add', t: p.t, id: p.id, kind: p.kind, lat: p.lat, lon: p.lon, tags: p.tags || {}, value: GAME.addReward, place: null });
+        counted += GAME.addReward;
+      }
+      if (g && (g.total || 0) > counted) out.push({ type: 'legacy', t: 0, value: g.total - counted });
+      for (const [id, r] of Object.entries(v || {})) out.push({ type: 'vote', t: r.t || 0, spot: id, lat: r.lat, lon: r.lon, v: r.v });
+    } catch (e) { /* start fresh */ }
+    out.sort((x, y) => (x.t || 0) - (y.t || 0));
+    return out;
+  }
+
+  const today = () => dayKey(new Date());
+  const visitsOf = id => links.visits.get(id) || [];
+  const myRating = id => { const e = links.ratings.get(id); return e ? e.rating : null; };
+  // A spot's score: your own stars for now; the shared average once ratings are on the server.
+  const scoreOf = id => { const r = myRating(id); return typeof r === 'number' ? r : null; };
+  const toNum = v => (v === CLOSED ? CLOSED : Number(v));
+  const myTags = id => (links.notes.get(id) || { tags: [] }).tags;
+  // A sunset spot: water to the west, or someone (for now: you) tagged it Sunset.
+  const isSunsetSpot = s => s.kind !== 'toilet' && (sunsetWater(s.m) || myTags(s.id).includes('sunset'));
+  const hhmm = d => d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  // Today's sunset here, or tomorrow's once today's has passed.
+  function nextSunset() {
+    const c = state.user || state.center;
+    if (!c) return null;
+    const now = new Date();
+    const today = sunsetAt(now, c.lat, c.lon);
+    if (today && today > now) return { at: today, day: 'today' };
+    const tomorrow = sunsetAt(new Date(now.getTime() + 86400000), c.lat, c.lon);
+    return tomorrow ? { at: tomorrow, day: 'tomorrow' } : null;
+  }
+  // For sorting by "best": your own stars where you've rated, otherwise the estimate from the surroundings.
+  const bestScore = s => scoreOf(s.id) ?? s.estimate ?? 2.5;
+  const promising = s => s.kind !== 'toilet' && myRating(s.id) == null && (s.estimate || 0) >= PROMISING_FROM;
+  const visited = id => visitsOf(id).length > 0;
+  const lastVisit = id => visitsOf(id).reduce((a, e) => (!a || e.t > a.t ? e : a), null);
+  const canRerate = id => visitsOf(id).some(e => Date.now() - e.t <= GAME.rateWindowHours * 3600000);
+  const look = () => raccoonById(me.raccoon);
+  const petName = () => me.name || (me.raccoon ? look().name : 'your raccoon');
+
+  // The raccoon is an optional companion; without it the app stays calm.
+  const companionOn = () => me.companion === true;
+  function updateRaccoonButton() {
+    const b = $('#raccoonBtn');
+    if (companionOn()) {
+      b.innerHTML = `<span aria-hidden="true">🦝</span> ${me.total}`;
+      b.setAttribute('aria-label', 'Your raccoon and your spots');
+    } else {
+      b.textContent = 'My spots';
+      b.setAttribute('aria-label', 'Your rated spots and passport');
+    }
+  }
+
+  function metres(lat1, lon1, lat2, lon2) {
+    const k = Math.PI / 180, x = (lon2 - lon1) * k * Math.cos((lat1 + lat2) / 2 * k), y = (lat2 - lat1) * k;
+    return Math.hypot(x, y) * 6371000;
+  }
+
+  /* ---------- map ---------- */
+  const map = L.map('map', { zoomControl: false, attributionControl: false, preferCanvas: true })
+    .setView([ZURICH.lat, ZURICH.lon], 15);
+  if (wide.matches) L.control.zoom({ position: 'topright' }).addTo(map);
+  L.control.attribution({ position: 'topright' }).addTo(map);
+  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19,
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+  }).addTo(map);
+  const markerLayer = L.layerGroup().addTo(map);
+  let areaCircle = null, userMarker = null;
+
+  map.on('zoomend', () => renderMarkers());
+  map.on('moveend', () => {
+    if (!state.center || state.phase === 'loading') return;
+    const c = map.getCenter();
+    $('#searchHere').hidden = map.distance(c, [state.center.lat, state.center.lon]) < 300;
+  });
+  map.on('click', e => {
+    if (state.mode === 'add' && state.add.step === 'place') {
+      movePin(e.latlng.lat, e.latlng.lng);
+      return;
+    }
+    if (state.mode !== 'peek') {
+      state.selected = null;
+      setMode('peek');
+      renderMarkers();
+    }
+  });
+
+  /* ---------- data ---------- */
+  async function post(url, query, ms) {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), ms);
+    try {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: 'data=' + encodeURIComponent(query),
+        signal: ctrl.signal,
+      });
+      if (!res.ok) throw new Error('replied ' + res.status);
+      const json = await res.json();
+      if (json.remark && /error|timed out|memory/i.test(json.remark)) throw new Error('ran out of time');
+      return json;
+    } catch (e) {
+      if (e.name === 'AbortError') throw new Error('no answer in time');
+      if (e instanceof TypeError) throw new Error('refused or busy');
+      throw e;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  async function overpass(query) {
+    const errors = [];
+    for (const url of ENDPOINTS) {
+      try {
+        return await post(url, query, 50000);
+      } catch (e) {
+        errors.push(`${new URL(url).host} ${e.message}`);
+      }
+    }
+    throw new Error(errors.join(', '));
+  }
+
+  function drawArea(center, radius) {
+    if (areaCircle) areaCircle.remove();
+    areaCircle = L.circle([center.lat, center.lon], {
+      radius, color: css('--ink-3'), weight: 1, dashArray: '3 6', fill: false, interactive: false,
+    }).addTo(map);
+  }
+
+  /* ---------- saved squares of map data ----------
+     Data comes in squares of about 3.3 km. Squares are saved on the phone (IndexedDB),
+     so moving around or reopening the app reuses them instead of loading again. */
+  const idb = (() => {
+    let dbp = null;
+    const open = () => dbp || (dbp = new Promise((res, rej) => {
+      const r = indexedDB.open('pause', 1);
+      r.onupgradeneeded = () => r.result.createObjectStore('tiles');
+      r.onsuccess = () => res(r.result);
+      r.onerror = () => rej(r.error);
+    }));
+    return {
+      async get(k) {
+        try {
+          const db = await open();
+          return await new Promise(res => {
+            const q = db.transaction('tiles').objectStore('tiles').get(k);
+            q.onsuccess = () => res(q.result || null);
+            q.onerror = () => res(null);
+          });
+        } catch (e) { return null; }
+      },
+      async put(k, v) {
+        try { (await open()).transaction('tiles', 'readwrite').objectStore('tiles').put(v, k); } catch (e) { /* storage full or blocked */ }
+      },
+    };
+  })();
+
+  const cache = new Map();   // recently used squares, kept in memory as well
+  const failed = new Map();  // square → why it failed
+  const CACHE_SIZE = 20;
+  function remember(id, rec) {
+    cache.delete(id);
+    cache.set(id, rec);
+    while (cache.size > CACHE_SIZE) {
+      const old = [...cache.keys()].find(k => !currentNeed.includes(k));
+      if (!old) break;
+      cache.delete(old);
+    }
+  }
+  let currentNeed = [];
+  let queue = [], working = false, probeToken = 0;
+  const fresh = rec => rec.ver === TILE_VERSION && Date.now() - rec.t < TILE_MAX_AGE_DAYS * 86400000;
+
+  function enqueue(ids, urgent) {
+    const list = ids.filter(id => !(cache.has(id) && fresh(cache.get(id))));
+    queue = queue.filter(id => !list.includes(id));
+    queue = urgent ? list.concat(queue) : queue.concat(list);
+    pump();
+  }
+
+  async function pump() {
+    if (working) return;
+    working = true;
+    while (queue.length) {
+      const id = queue.shift();
+      const needed = currentNeed.includes(id);
+      const inMemory = cache.has(id);
+      const saved = cache.get(id) || await idb.get(id);
+      if (saved && fresh(saved)) {
+        remember(id, saved);
+        if (needed && !inMemory) refresh();
+        continue;
+      }
+      try {
+        const json = await overpass(buildTileQuery(tileBox(id)));
+        const rec = { t: Date.now(), ver: TILE_VERSION, data: slimTile(json, tileBox(id)) };
+        idb.put(id, rec);
+        failed.delete(id);
+        remember(id, rec);
+        if (currentNeed.includes(id)) refresh();
+      } catch (err) {
+        failed.set(id, err.message);
+        if (currentNeed.includes(id)) refresh();
+      }
+    }
+    working = false;
+  }
+
+  function userElements() {
+    return me.pins.map(a => ({
+      type: 'user', id: a.id.split('/')[1], lat: a.lat, lon: a.lon,
+      tags: Object.assign(a.kind === 'table' ? { leisure: 'picnic_table' } : { amenity: 'bench' }, a.tags || {}),
+    }));
+  }
+
+  // Recompute the visible spots from whatever squares are available.
+  function refresh() {
+    const recs = currentNeed.map(id => cache.get(id)).filter(Boolean);
+    state.pending = currentNeed.filter(id => !cache.has(id) && !failed.has(id)).length;
+    state.failedN = currentNeed.filter(id => !cache.has(id) && failed.has(id)).length;
+    if (!recs.length) {
+      if (state.pending) { state.phase = 'loading'; render(); return; }
+      showFailure();
+      return;
+    }
+    const sections = mergeTiles(recs.map(r => r.data));
+    sections.spots.push(...userElements());
+    state.spots = analyseSections(sections, state.center, SEARCH_RADIUS);
+    linkEvents();
+    if (state.pendingOpen) {
+      const p = state.pendingOpen;
+      const hit = nearestSpot(p.lat, p.lon, 25);
+      if (hit || !state.pending) {
+        state.pendingOpen = null;
+        if (hit) { state.selected = hit.id; state.mode = 'detail'; state.reveal = null; state.ckMsg = ''; }
+      }
+    }
+    if (!placesQueued) {
+      placesQueued = true;
+      events.filter(e => (e.type === 'checkin' || e.type === 'add') && e.lat != null && !(e.place && e.place.v === 3)).slice(-15).forEach(queuePlace);
+    }
+    state.phase = 'ready';
+    if (state.selected && !state.spots.some(s => s.id === state.selected)) {
+      state.selected = null;
+      if (state.mode === 'detail') state.mode = 'peek';
+    }
+    render();
+  }
+
+  // Visits and votes are saved with coordinates. Match each one to the spot it belongs to now,
+  // so spots can be regrouped when the map changes without losing anything.
+  let placesQueued = false;
+  function linkEvents() {
+    const visits = new Map(), ratingsBy = new Map(), notesBy = new Map();
+    links = { visits, ratings: ratingsBy, notes: notesBy };
+    if (!state.spots.length || !state.center) return;
+    const memberOf = new Map();
+    for (const s of state.spots) for (const mb of s.members) memberOf.set(mb.id, s);
+    const seatSpots = state.spots.filter(s => s.kind !== 'toilet');
+    const c = state.center, reach = SEARCH_RADIUS + 200;
+    const near = (lat, lon) => {
+      if (metres(lat, lon, c.lat, c.lon) > reach) return null;
+      let best = null, bd = Infinity;
+      for (const s of seatSpots) {
+        for (const mb of s.members) {
+          const d = metres(lat, lon, mb.lat, mb.lon);
+          if (d < bd) { bd = d; best = s; }
+        }
+      }
+      return bd <= GROUP_RADIUS ? best : null;
+    };
+    const spotOf = e => memberOf.get(e.spot || e.id) || (e.lat != null ? near(e.lat, e.lon) : null);
+    let repaired = false;
+    for (const e of me.visits) {
+      const s = spotOf(e);
+      if (!s) continue;
+      // Some early check-ins were saved without coordinates, so they couldn't get a stamp.
+      // Their spot is loaded now, so fill them in and look up the place.
+      if (e.lat == null) {
+        e.lat = +s.lat.toFixed(6);
+        e.lon = +s.lon.toFixed(6);
+        repaired = true;
+        queuePlace(e);
+      }
+      if (!visits.has(s.id)) visits.set(s.id, []);
+      visits.get(s.id).push(e);
+    }
+    for (const e of me.ratings) {
+      const s = spotOf(e);
+      if (!s) continue;
+      const cur = ratingsBy.get(s.id);
+      if (!cur || e.t >= cur.t) ratingsBy.set(s.id, e);
+    }
+    for (const e of me.notes) {
+      const s = spotOf(e);
+      if (!s) continue;
+      const cur = notesBy.get(s.id);
+      if (!cur || e.t >= cur.t) notesBy.set(s.id, e);
+    }
+    if (repaired) saveEvents();
+  }
+
+  function nearestSpot(lat, lon, within) {
+    let best = null, bd = Infinity;
+    for (const s of state.spots) {
+      for (const mb of s.members) {
+        const d = metres(lat, lon, mb.lat, mb.lon);
+        if (d < bd) { bd = d; best = s; }
+      }
+    }
+    return bd <= within ? best : null;
+  }
+
+  /* ---------- passport places ----------
+     After each check-in, OpenStreetMap is asked which town (or city district) and country
+     the spot is in. Offline check-ins are looked up the next time the app opens. */
+  const placeQueue = [];
+  let placeBusy = false;
+  function queuePlace(ev) {
+    if (ev && ev.lat != null && ev.kind !== 'toilet' && !(ev.place && ev.place.v === 3)) { placeQueue.push(ev); pumpPlaces(); }
+  }
+  // Saves the whole chain (country, town, district, neighbourhood). Which one a stamp shows
+  // is decided when it's drawn, so the rule can change later without asking again.
+  async function lookupPlace(lat, lon) {
+    const json = await overpass(`[out:json][timeout:20];is_in(${lat},${lon})->.a;area.a["boundary"="administrative"]["admin_level"];out tags;`);
+    const areas = (json.elements || []).filter(e => e.tags && e.tags.admin_level);
+    const lvl = n => areas.find(a => a.tags.admin_level === String(n));
+    const country = lvl(2);
+    const town = lvl(8) || lvl(7) || lvl(6);
+    const inTown = town && (town === lvl(8) || town === lvl(7));
+    const l9 = inTown ? lvl(9) : null, l10 = inTown ? lvl(10) : null;
+    if (!town && !country) throw new Error('no place found');
+    const cname = country ? (country.tags['name:en'] || country.tags.name) : 'Somewhere';
+    return {
+      v: 3,
+      townArea: town ? town.id : null,
+      country: cname,
+      code: country ? (country.tags['ISO3166-1:alpha2'] || country.tags['ISO3166-1'] || '') : '',
+      town: town ? town.tags.name : cname,
+      district: l9 ? l9.tags.name : '',
+      neighbourhood: l10 ? l10.tags.name : '',
+    };
+  }
+  async function pumpPlaces() {
+    if (placeBusy) return;
+    placeBusy = true;
+    while (placeQueue.length) {
+      const ev = placeQueue.shift();
+      if (ev.place && ev.place.v === 3) continue;
+      try {
+        ev.place = await lookupPlace(ev.lat, ev.lon);
+        saveEvents();
+        countSubareas(ev.place);
+        me = deriveState(events);
+        linkEvents();
+        placeResolved(ev);
+      } catch (e) { /* stays empty and is tried again next time */ }
+    }
+    placeBusy = false;
+  }
+  // How many neighbourhoods (or districts) a town has, asked once per town and kept on the phone.
+  const SUBAREA_KEY = 'benchbandit.subareas.v1';
+  let subareas = {};
+  try { subareas = JSON.parse(localStorage.getItem(SUBAREA_KEY)) || {}; } catch (e) { subareas = {}; }
+  const subLevel = place => (placeParts(place).sub ? (placeParts(place).sub === place.neighbourhood ? 10 : 9) : null);
+  function subareaInfo(country, town) {
+    const hit = Object.values(subareas).find(x => x.country === country && x.town === town);
+    return hit || null;
+  }
+  async function countSubareas(place) {
+    const level = subLevel(place);
+    if (!level || !place.townArea) return;
+    const key = place.townArea + ':' + level;
+    if (subareas[key]) return;
+    try {
+      const json = await overpass(`[out:json][timeout:25];area(${place.townArea})->.t;rel(area.t)["boundary"="administrative"]["admin_level"="${level}"];out tags;`);
+      const names = new Set((json.elements || []).map(e => e.tags && e.tags.name).filter(Boolean));
+      subareas[key] = { country: place.country, town: place.town, level, count: names.size, t: Date.now() };
+      try { localStorage.setItem(SUBAREA_KEY, JSON.stringify(subareas)); } catch (e) { /* ignore */ }
+      if (state.mode === 'raccoon') renderPanel();
+    } catch (e) { /* try again another time */ }
+  }
+
+  function placeResolved(ev) {
+    const label = stampLabel(ev.place);
+    const isNew = !me.visits.some(e => e !== ev && e.place && stampLabel(e.place) === label && e.t <= ev.t);
+    if (state.reveal && state.reveal.t === ev.t) state.reveal.stamp = { label, isNew };
+    if (state.mode === 'detail' || state.mode === 'raccoon') renderPanel();
+  }
+
+  async function showFailure() {
+    const token = ++probeToken;
+    state.phase = 'loading';
+    render();
+    let reachable = false;
+    try {
+      await post(ENDPOINTS[0], '[out:json][timeout:10];node(1);out ids;', 15000);
+      reachable = true;
+    } catch (e) { /* stays false */ }
+    if (token !== probeToken) return;
+    const why = reachable
+      ? 'The data server is reachable but couldn’t finish loading this area, most likely because it’s busy. Try again in a minute.'
+      : location.protocol === 'file:'
+        ? 'The data servers refused the request. The page is open as a local file, which they may reject, so open it through your GitHub Pages link instead.'
+        : 'The data servers couldn’t be reached. They may be overloaded, or this network may block them. Try again in a minute or on another connection.';
+    const detail = [...new Set(currentNeed.map(id => failed.get(id)).filter(Boolean))].join(', ');
+    state.phase = 'error';
+    state.error = `<p>${why}</p><p class="detail-line">${esc(detail)}</p>`;
+    if (!wide.matches) state.mode = 'list';
+    render();
+  }
+
+  // Show spots within 1.5 km of a point, using saved squares where possible,
+  // and quietly load the rest of the 5 km surroundings in the background.
+  async function showAround(center, place) {
+    probeToken++;
+    Object.assign(state, { center, place, shown: PAGE, error: '' });
+    if (state.mode === 'detail') { state.selected = null; state.mode = 'peek'; }
+    $('#searchHere').hidden = true;
+    drawArea(center, SEARCH_RADIUS);
+    const need = tilesForCircle(center, SEARCH_RADIUS + 450);
+    currentNeed = need;
+    await Promise.all(need.filter(id => !cache.has(id)).map(async id => {
+      const rec = await idb.get(id);
+      if (rec && currentNeed.includes(id)) remember(id, rec);
+    }));
+    if (currentNeed !== need) return;
+    need.forEach(id => failed.delete(id));
+    refresh();
+    enqueue(need.filter(id => !cache.has(id)), true);
+    const later = tilesForCircle(center, FETCH_RADIUS).filter(id => !need.includes(id))
+      .concat(need.filter(id => cache.has(id) && !fresh(cache.get(id))));
+    enqueue(later, false);
+  }
+
+  /* ---------- filtering ---------- */
+  function passes(s) {
+    if (s.kind === 'toilet' ? !state.types.toilet : !((state.types.bench && s.hasBench) || (state.types.table && s.hasTable))) return false;
+    const n = state.need;
+    if (n.liked && !isLovely(scoreOf(s.id))) return false;
+    if (n.nice && !isNice(scoreOf(s.id))) return false;
+    if (n.sunset && !isSunsetSpot(s)) return false;
+    if (n.visited && !visited(s.id)) return false;
+    if (n.water && !s.flags.water) return false;
+    if (n.green && !s.flags.green) return false;
+    if (n.quiet && !s.flags.quiet) return false;
+    return true;
+  }
+  const visible = () => {
+    const v = state.spots.filter(passes);
+    if (state.sortBy === 'best') v.sort((a, b) => bestScore(b) - bestScore(a) || a.dist - b.dist);
+    return v;
+  };
+  const selectedSpot = () => state.spots.find(s => s.id === state.selected) || null;
+
+  /* ---------- rendering ---------- */
+  function render() {
+    renderFilters();
+    renderMarkers();
+    renderPanel();
+  }
+
+  function renderFilters() {
+    document.querySelectorAll('.chip.type').forEach(btn => {
+      const k = btn.dataset.type;
+      btn.setAttribute('aria-pressed', String(state.types[k]));
+      btn.querySelector('.count').textContent =
+        state.phase === 'ready' ? state.spots.filter(s => (k === 'toilet' ? s.kind === 'toilet' : k === 'bench' ? s.hasBench : s.hasTable)).length : '';
+    });
+    document.querySelectorAll('.chip.need').forEach(btn => {
+      btn.setAttribute('aria-pressed', String(state.need[btn.dataset.need]));
+    });
+  }
+
+  // Zoomed out, nearby spots merge into a bubble with a count. Liked and selected
+  // spots always stay visible on their own.
+  const CLUSTER_MAX_ZOOM = 16, CLUSTER_CELL = 40;
+  function renderMarkers() {
+    markerLayer.clearLayers();
+    if (state.phase !== 'ready') return;
+    const ink = css('--ink'), paper = css('--paper'), like = css('--like');
+    const z = map.getZoom();
+    const solo = [], cells = new Map();
+    for (const s of visible()) {
+      if (z > CLUSTER_MAX_ZOOM || s.id === state.selected || isLovely(scoreOf(s.id))) { solo.push(s); continue; }
+      const p = map.project([s.lat, s.lon], z);
+      const key = Math.floor(p.x / CLUSTER_CELL) + ',' + Math.floor(p.y / CLUSTER_CELL);
+      if (!cells.has(key)) cells.set(key, []);
+      cells.get(key).push(s);
+    }
+    for (const group of cells.values()) {
+      if (group.length === 1) { solo.push(group[0]); continue; }
+      const lat = group.reduce((n, s) => n + s.lat, 0) / group.length;
+      const lon = group.reduce((n, s) => n + s.lon, 0) / group.length;
+      const size = group.length < 10 ? 28 : group.length < 50 ? 34 : 40;
+      L.marker([lat, lon], {
+        icon: L.divIcon({ className: 'bubble-wrap', html: `<div class="bubble">${group.length}</div>`, iconSize: [size, size], iconAnchor: [size / 2, size / 2] }),
+        title: `${group.length} spots, tap to zoom in`,
+      }).on('click', () => {
+        map.fitBounds(L.latLngBounds(group.map(s => [s.lat, s.lon])).pad(0.4), { maxZoom: CLUSTER_MAX_ZOOM + 2, animate: !reduceMotion });
+      }).addTo(markerLayer);
+    }
+    // Draw order puts liked and selected pins on top.
+    const rank = s => (s.id === state.selected ? 3 : isLovely(scoreOf(s.id)) ? 2 : isLow(myRating(s.id)) ? 0 : 1);
+    solo.sort((a, b) => rank(a) - rank(b));
+    for (const s of solo) {
+      const sel = s.id === state.selected, v = isLovely(scoreOf(s.id)) ? 1 : isLow(myRating(s.id)) ? -1 : 0;
+      const group = s.members.length > 1;
+      L.circleMarker([s.lat, s.lon], {
+        radius: sel ? 10 : v === 1 ? 8 : v === -1 ? 5 : group ? 7 : 6,
+        color: sel ? ink : v === 1 ? like : s.added ? ink : promising(s) ? '#E0A526' : paper,
+        weight: sel || v === 1 ? 3 : s.added || promising(s) ? 2.5 : 1.5,
+        fillColor: colorOf(s.kind),
+        fillOpacity: v === -1 && !sel ? 0.35 : 0.95,
+        dashArray: s.added && !sel && v !== 1 ? '3 3' : null,
+        bubblingMouseEvents: false,
+      }).on('click', () => openSpot(s.id)).addTo(markerLayer);
+    }
+  }
+
+  function statusText() {
+    switch (state.phase) {
+      case 'idle': return '';
+      case 'locating': return 'Finding your location…';
+      case 'loading': return `Loading spots around ${state.place}. The first time can take up to 30 seconds; after that the area is saved on your phone.`;
+      case 'error': return 'Couldn’t load data from OpenStreetMap.';
+    }
+    const v = visible(), total = state.spots.length;
+    let text;
+    if (!total) text = `Nothing mapped within ${km(SEARCH_RADIUS)} of ${state.place}.`;
+    else if (!v.length) text = 'No spots match these filters.';
+    else {
+      const lovely = v.filter(s => isLovely(scoreOf(s.id))).length;
+      text = `${v.length} ${v.length === 1 ? 'spot' : 'spots'} within ${km(SEARCH_RADIUS)} of ${state.place}${lovely ? `, ${lovely} lovely` : ''}.`;
+    }
+    if (state.pending) text += ' Still loading part of the area…';
+    else if (state.failedN) text += ' Part of the area couldn’t load.';
+    else if (state.place === 'Zurich centre') text += ' Tap Locate me to search around you.';
+    if (state.need.sunset) {
+      const ns = nextSunset();
+      if (ns) text += ` Sunset ${ns.day} at ${hhmm(ns.at)}.`;
+    }
+    return text;
+  }
+
+  // "Sunset at 18:24. 3 sunset spots nearby." Shown in the hour and a half before sunset.
+  function renderSunsetBanner() {
+    const box = $('#sunsetBanner');
+    const ns = nextSunset();
+    const mins = ns && ns.day === 'today' ? (ns.at - Date.now()) / 60000 : Infinity;
+    const count = state.phase === 'ready' ? state.spots.filter(isSunsetSpot).length : 0;
+    if (!(mins <= 90 && count && !state.need.sunset && state.sunsetHidden !== dayKey(new Date()))) { box.hidden = true; return; }
+    box.hidden = false;
+    box.innerHTML = `<span class="sun" aria-hidden="true">☀</span>
+      <span class="sunset-text">Sunset at ${hhmm(ns.at)}. ${count} sunset ${count === 1 ? 'spot' : 'spots'} within ${km(SEARCH_RADIUS)}.</span>
+      <button type="button" class="sunset-go" data-sun="show">Show</button>
+      <button type="button" class="sunset-x" data-sun="hide" aria-label="Hide for today">×</button>`;
+  }
+
+  function renderPanel() {
+    const panel = $('#panel');
+    panel.dataset.mode = state.mode;
+    $('#status').textContent = statusText();
+    renderSunsetBanner();
+    const toggle = $('#panelToggle');
+    toggle.textContent = state.mode === 'peek' ? 'Show list' : state.mode === 'list' ? 'Hide list' : 'Close';
+    if (state.mode === 'raccoon' || state.mode === 'add') {
+      toggle.hidden = false;
+      $('#panelBody').innerHTML = state.mode === 'raccoon' ? raccoonHTML() : addHTML();
+      return;
+    }
+    toggle.hidden = state.phase === 'idle' || state.phase === 'locating';
+
+    let html = '';
+    const sel = selectedSpot();
+    if (state.phase === 'error') {
+      html = `<div class="message">${state.error}<button class="pill" type="button" data-act="retry">Try again</button></div>`;
+    } else if (state.phase !== 'ready') {
+      html = state.phase === 'locating'
+        ? '<div class="message"><p>Allow location access to see spots around you. Without it, the map starts at Zurich centre.</p></div>'
+        : '<div class="message"><p>Reading OpenStreetMap. Busy areas can take up to 30 seconds.</p></div>';
+    } else if (state.mode === 'detail' && sel) {
+      html = detailHTML(sel);
+    } else {
+      html = listHTML();
+    }
+    $('#panelBody').innerHTML = html;
+  }
+
+  function factsHTML(list, warn) {
+    if (!list.length) return '';
+    return `<span class="facts${warn ? ' warn' : ''}">${list.map(f =>
+      `<span class="fact">${esc(f.label)} <span class="d">${fmtDist(f.d)}</span></span>`).join('')}</span>`;
+  }
+
+  function summaryHTML(tx, big) {
+    return `<span class="sentence${big ? ' big' : ''}">${esc(tx.sentence)}</span>
+      ${tx.comfort ? `<span class="comfort">${esc(tx.comfort)}</span>` : ''}
+      ${tx.note ? `<span class="comfort quiet">${esc(tx.note)}</span>` : ''}
+      ${factsHTML(tx.facts, false)}
+      ${factsHTML(tx.warnings, true)}`;
+  }
+
+  function listHTML() {
+    const v = visible();
+    if (!state.spots.length) {
+      return '<div class="message"><p>Move the map somewhere else and tap Search this area.</p></div>';
+    }
+    if (!v.length) {
+      return '<div class="message"><p>No spots match these filters. Turn one off to see more.</p></div>';
+    }
+    const sorter = `<div class="seg sorter" role="group" aria-label="Sort">
+        <button class="segbtn" type="button" data-act="sort" data-v="near" aria-pressed="${state.sortBy === 'near'}">Nearest</button>
+        <button class="segbtn" type="button" data-act="sort" data-v="best" aria-pressed="${state.sortBy === 'best'}">Best</button>
+      </div>`;
+    const items = v.slice(0, state.shown).map(s => {
+      return `<li class="spot${isLow(myRating(s.id)) ? ' disliked' : ''}">
+        <button class="spot-head" type="button" data-act="open" data-id="${esc(s.id)}">
+          <span class="dot" style="--c:${colorOf(s.kind)}" aria-hidden="true"></span>
+          <span class="spot-body">${summaryHTML(s.text, false)}</span>
+          <span class="dist">${fmtDist(s.dist)}${visitTag(s)}</span>
+        </button>
+      </li>`;
+    }).join('');
+    const rest = v.length - state.shown;
+    const more = rest > 0 ? `<button class="pill more" type="button" data-act="more">Show ${Math.min(PAGE, rest)} more</button>` : '';
+    return `${sorter}<ul class="list">${items}</ul>${more}
+      <p class="note">Descriptions are estimated from OpenStreetMap data, so something missing from the map may still exist in real life.</p>`;
+  }
+
+  function visitTag(s) {
+    const r = myRating(s.id);
+    if (r === CLOSED) return '<span class="tag low">Closed</span>';
+    if (r) return `<span class="tag ${isLovely(r) ? 'lovely' : isNice(r) ? 'nice' : isLow(r) ? 'low' : ''}">${r}★ ${esc(ratingWord(r, s.kind))}</span>`;
+    if (visited(s.id)) return '<span class="tag">Visited</span>';
+    return promising(s) ? '<span class="tag promising">Looks promising</span>' : '';
+  }
+
+  function checkinHTML(s) {
+    const toilet = s.kind === 'toilet';
+    const r = state.reveal && state.reveal.id === s.id ? state.reveal : null;
+    const rated = myRating(s.id);
+    const been = visited(s.id);
+    if (r && r.revisit) {
+      return `<div class="checkin"><p class="ck-lead">Saved: ${esc(ratedText(r.rating, s.kind))}. Thanks for keeping it up to date.</p></div>`;
+    }
+    if (r && !companionOn()) {
+      const lines = [r.rating === CLOSED ? 'You marked it closed or locked.' : `You gave it ${ratedText(r.rating, s.kind)}.`];
+      if (r.stamp) lines.push(r.stamp.isNew ? `New passport stamp: ${r.stamp.label}.` : `Stamped in ${r.stamp.label}.`);
+      return `<div class="checkin">
+        <div class="reveal"><span class="snack calm" aria-hidden="true">★</span>
+          <span class="reveal-text"><strong>Thanks for rating!</strong>${lines.map(l => `<span>${esc(l)}</span>`).join('')}</span>
+        </div>
+        ${!toilet && typeof r.rating === 'number' && r.rating >= 4 ? '<div class="actions"><button type="button" class="plain" data-act="shareSpot">Share this spot</button></div>' : ''}
+        ${me.companion === null ? offerHTML() : ''}
+      </div>`;
+    }
+    if (r) {
+      const name = (r.snack.rare ? 'golden ' : '') + r.snack.name;
+      const lines = [r.rating === CLOSED ? 'You marked it closed or locked.' : `You gave it ${ratedText(r.rating, s.kind)}.`];
+      if (toilet) lines.push(`${cap(petName())} waited politely outside.`);
+      if (r.snack.rare) lines.push(`Rare find! It counts as ${GAME.rareValue} snacks.`);
+      if (r.streakBonus) lines.push('Your weekly streak continues: one extra snack.');
+      lines.push(`${cap(petName())} has now eaten ${me.total}.`);
+      if (r.stamp) lines.push(r.stamp.isNew ? `New passport stamp: ${r.stamp.label}.` : `Stamped in ${r.stamp.label}.`);
+      const trinket = r.trinket ? TRINKETS.find(t => t.id === r.trinket) : null;
+      return `<div class="checkin${r.snack.rare || trinket ? ' rare' : ''}">
+        <div class="reveal"><span class="snack" aria-hidden="true">${r.snack.emoji}</span>
+          <span class="reveal-text"><strong>${esc(cap(name))} for ${esc(petName())}!</strong>${lines.map(l => `<span>${esc(l)}</span>`).join('')}</span>
+        </div>
+        ${trinket ? `<p class="found"><span aria-hidden="true">✨</span> ${esc(cap(petName()))} found a trinket: ${esc(trinket.name)}! <button class="link-btn" type="button" data-act="openWardrobe">Put it on</button></p>` : ''}
+        ${bubble(voiceOf(me.raccoon, r.snack.rare ? 'golden' : trinket ? 'trinket' : isLovely(r.rating) ? 'lovely' : isLow(r.rating) ? 'low' : 'happy'))}
+        ${!toilet && typeof r.rating === 'number' && r.rating >= 4 ? '<div class="actions"><button type="button" class="plain" data-act="shareSpot">Share this spot</button></div>' : ''}
+        ${!me.raccoon ? '<p class="found">Your raccoon doesn’t have a face yet. <button class="link-btn" type="button" data-act="openRaccoon">Choose one</button></p>' : ''}
+      </div>`;
+    }
+    if (state.rateFor === s.id) {
+      const q = been && rated ? stillQuestion(rated) : toilet ? 'How is this toilet?' : 'How is this spot?';
+      return `<div class="checkin">
+        <p class="ck-lead rate-q">${esc(q)}</p>
+        ${starsRow(s.kind, been ? rated : null, 'rate', false)}
+        <p class="ck-msg">${been
+          ? (companionOn() ? 'Snacks are only for new spots, but an up-to-date rating helps everyone find the best ones.' : 'An up-to-date rating helps everyone find the best spots.')
+          : (companionOn() ? `Rate it and ${esc(petName())} gets a snack.` : 'Your rating helps others find the best places to sit.')}</p>
+      </div>`;
+    }
+    const last = lastVisit(s.id);
+    const when = last ? new Date(last.t).toLocaleDateString(undefined, { day: 'numeric', month: 'short' }) : '';
+    const lead = !been ? (toilet
+        ? (companionOn() ? 'Rate this toilet to help others, and your raccoon gets a snack while it waits outside.' : 'Rate this toilet to help others find a good one.')
+        : (companionOn() ? 'A snack is waiting for your first rating here.' : 'You haven’t rated this spot yet.'))
+      : rated === CLOSED ? `You marked this toilet closed on ${when}. Check in again if it has reopened.`
+      : rated ? `You gave this ${toilet ? 'toilet' : 'spot'} ${starText(rated)} (${ratingWord(rated, s.kind).toLowerCase()}) on ${when}. Check in again if something has changed.`
+      : 'You’ve been here before. Check in to rate it.';
+    return `<div class="checkin">
+      <p class="ck-lead">${esc(lead)}</p>
+      <button class="ck-btn" type="button" data-act="checkin"${state.checking ? ' disabled' : ''}>${state.checking ? 'Checking your location…' : been && rated ? 'Check in and update' : 'Check in and rate'}</button>
+      <p class="ck-msg">${esc(state.ckMsg || (TEST ? 'Test mode: your location isn’t checked.' : `Works within ${GAME.checkinRadius} m of the spot.`))}</p>
+    </div>`;
+  }
+
+  // "4 stars, nice" or "closed or locked"
+  function ratedText(r, kind) {
+    return r === CLOSED ? 'closed or locked' : `${starText(r)}, ${ratingWord(r, kind).toLowerCase()}`;
+  }
+
+  // Five stars, each with its word underneath, so people see what a grade means before tapping.
+  function starsRow(kind, current, act, small) {
+    const cur = typeof current === 'number' ? current : 0;
+    let html = `<div class="stars${small ? ' small' : ''}" role="group" aria-label="Your rating">` +
+      starWords(kind).map((w, i) => {
+        const n = i + 1;
+        return `<button class="star${n <= cur ? ' on' : ''}" type="button" data-act="${act}" data-v="${n}" aria-pressed="${cur === n}" aria-label="${starText(n)}: ${esc(w)}">
+          <span class="glyph" aria-hidden="true">★</span><span class="word">${esc(w)}</span></button>`;
+      }).join('') + '</div>';
+    if (kind === 'toilet') html += `<button class="closedbtn" type="button" data-act="${act}" data-v="${CLOSED}" aria-pressed="${current === CLOSED}">Closed or locked</button>`;
+    return html;
+  }
+
+  // "What's good here?" One optional tap per tag, for a day after checking in.
+  function tagsHTML(s) {
+    if (s.kind === 'toilet' || myRating(s.id) == null || !canRerate(s.id) || state.rateFor === s.id) return '';
+    const mine = myTags(s.id);
+    return `<div class="rerate">
+      <p class="field-label">What’s good here?</p>
+      <div class="tagchips">${SPOT_TAGS.map(([k, l]) => `<button class="chip need" type="button" data-act="tag" data-v="${k}" aria-pressed="${mine.includes(k)}">${l}</button>`).join('')}</div>
+    </div>`;
+  }
+
+  // Offered once, after the first rating.
+  function offerHTML() {
+    return `<div class="offer">
+      <p class="offer-title">Want some company?</p>
+      <p class="fine">A raccoon can come along and collect crumbs from every new spot you rate. It grows rounder, finds trinkets, and has opinions about benches.</p>
+      <div class="actions"><button type="button" class="go" data-act="companionYes">Bring a raccoon</button><button type="button" class="plain" data-act="companionNo">No thanks</button></div>
+    </div>`;
+  }
+
+  // A line from your raccoon, in its own voice.
+  function bubble(text) {
+    if (!text || !me.raccoon || !companionOn()) return '';
+    return `<div class="bubble-line"><span class="bubble-face" aria-hidden="true">${raccoonSVG({ look: look(), mood: 'happy', viewBox: '58 30 104 84' })}</span><p class="speech">${esc(text)}</p></div>`;
+  }
+
+  // For a day after checking in, the rating can still be changed (for a mis-tap).
+  function rerateHTML(s) {
+    const r = myRating(s.id);
+    if (!r || !canRerate(s.id) || state.rateFor === s.id) return '';
+    return `<div class="rerate">
+      <p class="field-label">Your rating</p>
+      ${starsRow(s.kind, r, 'rerate', true)}
+      <p class="fine">You can change it for ${GAME.rateWindowHours} hours after checking in.</p>
+    </div>`;
+  }
+
+  /* ---------- raccoon panel: raccoon, wardrobe, passport ---------- */
+  function raccoonHTML() {
+    if (companionOn() && (!me.raccoon || state.picking)) return pickHTML();
+    const tabs = companionOn()
+      ? [['raccoon', 'Raccoon'], ['wardrobe', 'Wardrobe'], ['passport', 'Passport'], ['rated', 'Rated']]
+      : [['rated', 'Rated'], ['passport', 'Passport']];
+    if (!tabs.some(t => t[0] === state.rtab)) state.rtab = tabs[0][0];
+    const body = state.rtab === 'wardrobe' ? wardrobeHTML() : state.rtab === 'passport' ? passportHTML()
+      : state.rtab === 'rated' ? ratedHTML() : raccoonTabHTML();
+    return `<div class="detail">
+      <div class="detail-nav"><button class="link-btn" type="button" data-act="back">Back to list</button></div>
+      <div class="tabs" role="tablist" aria-label="Your spots">${tabs.map(([k, l]) =>
+        `<button type="button" role="tab" class="tab" data-act="rtab" data-v="${k}" aria-selected="${state.rtab === k}">${l}</button>`).join('')}</div>
+      ${body}
+      <div class="settings">
+        <p class="rc-section">Settings</p>
+        <div class="setting-row"><span>Raccoon companion</span>
+          <button type="button" class="toggle" data-act="companion" aria-pressed="${companionOn()}">${companionOn() ? 'On' : 'Off'}</button></div>
+        <div class="actions reset"><button type="button" class="plain" data-act="showIntro">Show the intro again</button><button type="button" class="plain" data-act="reset">Start fresh</button></div>
+        <p class="fine">Start fresh clears your ratings, pins and stamps${companionOn() ? ', and your raccoon,' : ''} on this phone.</p>
+      </div>
+    </div>`;
+  }
+
+  function art() {
+    const st = stageOf(me.total), mood = moodOf(me.lastFed, Date.now());
+    const last = me.visits.filter(e => e.emoji).sort((a, b) => b.t - a.t)[0];
+    return raccoonSVG({ scale: st.scale, mood: mood.key, holding: mood.key === 'happy' && last ? last.emoji : '', look: look(), worn: me.worn });
+  }
+
+  function raccoonTabHTML() {
+    const now = Date.now();
+    const st = stageOf(me.total), mood = moodOf(me.lastFed, now);
+    const spots = new Set(me.visits.map(e => e.spot || e.id)).size;
+    const progress = st.next ? `${st.toNext} more ${st.toNext === 1 ? 'snack' : 'snacks'} until it’s ${st.next.label.toLowerCase()}.` : 'As round as a raccoon gets.';
+    const streak = streakOf(me.newSpots, now);
+    const streakLine = streak.weeks
+      ? `${streak.weeks}-week streak. ${streak.thisWeek ? 'This week already counts.' : 'Rate a new spot this week to keep it going and get an extra snack.'}`
+      : 'Rate at least one new spot a week to build a weekly streak.';
+    const when = t => {
+      const d = Math.round((new Date(now).setHours(0, 0, 0, 0) - new Date(t).setHours(0, 0, 0, 0)) / 86400000);
+      return d === 0 ? 'Today' : d === 1 ? 'Yesterday' : new Date(t).toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+    };
+    const recent = me.visits.filter(e => e.value > 0).sort((a, b) => b.t - a.t).slice(0, 15);
+    const log = recent.length
+      ? `<ul class="log">${recent.map(e => {
+          const added = e.type === 'add';
+          const label = added ? (e.kind === 'table' ? 'New picnic table' : 'New bench') : cap((e.rare ? 'golden ' : '') + e.name);
+          const trinket = e.trinket ? TRINKETS.find(t => t.id === e.trinket) : null;
+          return `<li class="${e.rare ? 'rare' : ''}">
+            <span class="em" aria-hidden="true">${added ? '📍' : e.emoji}</span>
+            <span class="what">${esc(label)}${trinket ? ` and a ${esc(trinket.name)}` : ''}<span class="where">${esc(added ? 'Added by you' : e.where || '')}</span></span>
+            <span class="val">+${e.value}<small>${when(e.t)}</small></span>
+          </li>`;
+        }).join('')}</ul>`
+      : '<p class="fine">No snacks yet. Find a bench, check in, and your raccoon gets its first meal.</p>';
+    return `${bubble(voiceOf(me.raccoon, mood.key === 'hungry' || mood.key === 'peckish' ? 'hungry' : 'happy'))}
+      <div class="raccoon-art">${art()}</div>
+      <div class="rc-head"><h2 class="rc-name">${esc(cap(petName()))}</h2><button class="link-btn" type="button" data-act="rename">Rename</button></div>
+      <p class="rc-line">${esc(st.label)}. ${esc(mood.label)}.</p>
+      <p class="rc-line quiet">${me.total} ${me.total === 1 ? 'snack' : 'snacks'} eaten at ${spots} ${spots === 1 ? 'spot' : 'spots'}${me.rares ? `, ${me.rares} golden` : ''}. ${progress}</p>
+      <p class="rc-line quiet">${esc(streakLine)}</p>
+      <p class="rc-line"><button class="link-btn" type="button" data-act="openPick">Switch raccoon</button> <button class="link-btn" type="button" data-act="shareRaccoon">Share</button></p>
+      <p class="rc-section">Recent snacks</p>
+      ${log}
+      <p class="fine">Check in within ${GAME.checkinRadius} m of a spot and rate it. The first time you rate a spot, your raccoon gets ${GAME.newSpotValue} snacks, and ${GAME.toiletValue} for a toilet. About 1 in ${GAME.rareOneIn} is golden and counts as ${GAME.rareValue}, and about 1 in ${GAME.trinketOneIn} new spots hides a trinket. Coming back lets you update your rating, without a snack, so the best spots stay up to date.${TEST ? ' Test mode is on, so your location isn’t checked.' : ''}</p>
+`;
+  }
+
+  function wardrobeHTML() {
+    const found = me.trinkets.length;
+    const slots = SLOTS.map(([slot, label]) => `<p class="rc-section">${label}</p>
+      <div class="tiles">${TRINKETS.filter(t => t.slot === slot).map(t => me.trinkets.includes(t.id)
+        ? `<button class="tile" type="button" data-act="wear" data-slot="${slot}" data-v="${t.id}" aria-pressed="${me.worn[slot] === t.id}">${trinketTileSVG(t.id, look())}<span>${esc(cap(t.name))}</span></button>`
+        : '<div class="tile locked"><span class="q" aria-hidden="true">?</span><span>Not found yet</span></div>').join('')}</div>`).join('');
+    return `<div class="raccoon-art small">${art()}</div>
+      <p class="rc-line quiet">${found} of ${TRINKETS.length} trinkets found. About 1 in ${GAME.trinketOneIn} new spots hides one you don’t have yet. Tap a trinket to put it on or take it off.</p>
+      ${slots}`;
+  }
+
+  function passportHTML() {
+    const pp = passportOf(me.visits);
+    const stamps = pp.reduce((n, c) => n + c.stamps.length, 0);
+    const seats = me.visits.filter(e => e.kind !== 'toilet');
+    const pending = seats.filter(e => !e.place && e.lat != null).length;
+    const unplaced = seats.filter(e => e.lat == null).length;
+    const checkins = seats.length;
+    const spots = new Set(seats.map(e => e.spot || e.id)).size;
+    const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+    const summary = stamps
+      ? `${plural(stamps, 'stamp', 'stamps')} from ${plural(checkins, 'check-in', 'check-ins')} at ${plural(spots, 'spot', 'spots')}. Stamps come from check-ins, not votes, and each one covers a whole neighbourhood or town, so several spots can share a stamp.`
+      : 'No stamps yet. Every neighbourhood or town you check in at adds one.';
+    const notes = [];
+    if (pending) notes.push(`${plural(pending, 'stamp is', 'stamps are')} still being looked up and will appear when your phone is online.`);
+    if (unplaced) notes.push(`${plural(unplaced, 'early check-in has', 'early check-ins have')} no saved location yet and will get ${unplaced === 1 ? 'its stamp' : 'their stamps'} next time that area is on the map.`);
+    return `<p class="rc-line quiet passport-intro">${esc(summary)}${notes.length ? ' ' + esc(notes.join(' ')) : ''}</p>
+      ${pp.map(c => `<p class="rc-section">${esc(c.country)}</p>
+        ${progressHTML(c)}
+        <div class="stamps">${c.stamps.map((st, i) => `<div class="stamp">${stampSVG(st, 'st' + hash32(c.country + st.label) + '_' + i)}</div>`).join('')}</div>`).join('')}
+      ${seats.length ? '<div class="actions"><button type="button" class="go" data-act="showVisited">Show my spots on the map</button></div>' : ''}`;
+  }
+
+  // One entry per rated spot, everywhere, using your latest rating of it.
+  function ratedEntries() {
+    const entries = [];
+    for (const e of me.ratings.slice().sort((a, b) => a.t - b.t)) {
+      if (e.lat == null || e.kind === 'toilet') continue;
+      const key = e.spot || e.id;
+      let hit = entries.find(x => x.keys.has(key) || metres(x.lat, x.lon, e.lat, e.lon) <= GROUP_RADIUS);
+      if (!hit) { hit = { keys: new Set(), lat: e.lat, lon: e.lon, last: e }; entries.push(hit); }
+      hit.keys.add(key);
+      if (e.t >= hit.last.t) { hit.last = e; hit.lat = e.lat; hit.lon = e.lon; }
+    }
+    return entries;
+  }
+
+  function ratedHTML() {
+    const want = state.rateTab;
+    const band = r => (r === 5 ? 'lovely' : r === 4 ? 'nice' : 'other');
+    const ref = state.user || state.center;
+    const all = ratedEntries();
+    const count = k => all.filter(x => band(x.last.rating) === k).length;
+    const list = all.filter(x => band(x.last.rating) === want).map(x => {
+      const live = state.spots.find(s => s.members.some(mb => x.keys.has(mb.id))) || nearestSpot(x.lat, x.lon, GROUP_RADIUS);
+      const visit = me.visits.filter(e => e.place && (x.keys.has(e.spot || e.id) || (e.lat != null && metres(e.lat, e.lon, x.lat, x.lon) <= 25)))
+        .sort((a, b) => b.t - a.t)[0];
+      return {
+        lat: x.lat, lon: x.lon, live,
+        kind: live ? live.kind : x.last.kind || 'bench',
+        stars: x.last.rating,
+        text: live ? live.text.sentence : x.last.where || `A spot you gave ${starText(x.last.rating)}.`,
+        place: visit ? stampLabel(visit.place)
+          : me.visits.some(e => x.keys.has(e.spot || e.id)) ? '' : 'No check-in here, so no stamp',
+        d: ref ? metres(ref.lat, ref.lon, x.lat, x.lon) : 0,
+      };
+    }).sort((a, b) => a.d - b.d);
+    state.votedList = list;
+    const seg = (k, label) => `<button class="segbtn" type="button" data-act="rateTab" data-v="${k}" aria-pressed="${want === k}">${label} (${count(k)})</button>`;
+    const items = list.map((x, i) => `<li class="spot">
+        <button class="spot-head" type="button" data-act="openVoted" data-i="${i}">
+          <span class="dot" style="--c:${colorOf(x.kind)}" aria-hidden="true"></span>
+          <span class="spot-body"><span class="sentence">${esc(x.text)}</span>${x.place ? `<span class="comfort">${esc(x.place)}</span>` : ''}</span>
+          <span class="dist">${ref ? fmtDist(x.d) : ''}<span class="tag">${x.stars}★</span></span>
+        </button>
+      </li>`).join('');
+    const empty = { lovely: 'No 5-star spots yet. Check in at a spot and rate it to keep it here.', nice: 'No 4-star spots yet.', other: 'No spots rated 3 stars or lower.' }[want];
+    return `<div class="seg voted-switch" role="group" aria-label="Show">${seg('lovely', 'Lovely')}${seg('nice', 'Nice')}${seg('other', 'Other')}</div>
+      ${list.length
+        ? `<p class="rc-line quiet passport-intro">Every spot you’ve rated, nearest first${state.user ? '' : ' from the map centre'}. Tap one to open it on the map.</p><ul class="list voted">${items}</ul>`
+        : `<p class="fine">${empty}</p>`}`;
+  }
+
+  // "Zürich: 3 of 34 neighbourhoods", for towns where stamps are per neighbourhood or district.
+  function progressHTML(country) {
+    const towns = new Map();
+    for (const st of country.stamps) {
+      if (!st.district) continue;
+      if (!towns.has(st.town)) towns.set(st.town, 0);
+      towns.set(st.town, towns.get(st.town) + 1);
+    }
+    if (!towns.size) return '';
+    const rows = [...towns].map(([town, n]) => {
+      const info = subareaInfo(country.country, town);
+      const word = info && info.level === 9 ? 'districts' : 'neighbourhoods';
+      if (!info || !info.count) return `<p class="progress-row"><span>${esc(town)}: ${n} ${n === 1 ? word.slice(0, -1) : word} so far</span></p>`;
+      const pct = Math.min(100, Math.round(n / info.count * 100));
+      return `<div class="progress-row"><span>${esc(town)}: ${n} of ${info.count} ${word}</span><span class="bar"><span style="width:${pct}%"></span></span></div>`;
+    }).join('');
+    return `<div class="progress">${rows}</div>`;
+  }
+
+  function pickHTML() {
+    const sel = state.pickSel || me.raccoon;
+    const switching = !!me.raccoon;
+    return `<div class="detail">
+      <div class="detail-nav"><button class="link-btn" type="button" data-act="${switching ? 'pickBack' : 'back'}">${switching ? 'Back' : 'Back to list'}</button></div>
+      <h2 class="add-title">${switching ? 'Switch raccoon' : 'Choose your raccoon'}</h2>
+      <p class="fine">${switching ? 'Your snacks, trinkets and stamps stay with you.' : 'It eats the snacks you find at benches and picnic tables. You can rename it, and switch later without losing anything.'}</p>
+      <div class="pick-grid">${RACCOONS.map(r => `<button class="pick" type="button" data-act="pickSel" data-v="${r.id}" aria-pressed="${sel === r.id}">
+          ${raccoonSVG({ look: r, mood: 'content', scale: 1 })}
+          <span class="pick-name">${esc(r.name)}</span><span class="pick-line">${esc(r.line)}</span>
+        </button>`).join('')}</div>
+      <button class="ck-btn" type="button" data-act="pickConfirm"${sel ? '' : ' disabled'}>${sel ? `Choose ${esc(raccoonById(sel).name)}` : 'Tap a raccoon to choose it'}</button>
+    </div>`;
+  }
+
+  function addHTML() {
+    const a = state.add;
+    const left = GAME.addsPerDay - me.adds.filter(e => dayKey(new Date(e.t)) === today()).length;
+    const seg = (act, value, label, cur) =>
+      `<button class="segbtn" type="button" data-act="${act}" data-v="${value}" aria-pressed="${cur === value}">${label}</button>`;
+    if (a.done) {
+      const rec = me.pins.find(x => x.id === a.done);
+      const note = rec ? `https://www.openstreetmap.org/note/new#map=19/${rec.lat.toFixed(6)}/${rec.lon.toFixed(6)}` : '#';
+      return `<div class="detail">
+        <div class="detail-nav"><button class="link-btn" type="button" data-act="back">Back to list</button></div>
+        <div class="checkin rare"><div class="reveal"><span class="snack" aria-hidden="true">📍</span>
+          <span class="reveal-text"><strong>New ${a.kind === 'table' ? 'picnic table' : 'bench'} added!</strong>
+          <span>${companionOn() ? `${esc(cap(petName()))} gets ${GAME.addReward} snacks and has now eaten ${me.total}.` : 'Thanks for putting it on the map.'}</span></span></div></div>
+        <p class="fine">The pin is saved on this phone for now. Telling OpenStreetMap about it puts it on the map for everyone.</p>
+        <div class="actions">
+          <button type="button" class="go" data-act="openAdded">Open it</button>
+          <a href="${note}" target="_blank" rel="noopener">Tell OpenStreetMap</a>
+        </div>
+      </div>`;
+    }
+    if (a.step === 'place') {
+      const what = a.kind === 'table' ? 'picnic table' : 'bench';
+      return `<div class="detail">
+        <div class="detail-nav"><button class="link-btn" type="button" data-act="addCancel">Cancel</button></div>
+        <h2 class="add-title">Drag the pin onto the ${what}</h2>
+        <p class="fine">GPS can be a few metres off, so move the pin to exactly where the ${what} is: drag it, or tap the map. It can go up to ${GAME.addMaxDistance} m from you. <span id="pinDist">${pinDistText()}</span></p>
+        <button class="ck-btn" type="button" data-act="addConfirm">Add the ${what} here</button>
+        <p class="ck-msg">${esc(a.msg)}</p>
+        ${a.near ? '<div class="actions"><button type="button" class="plain" data-act="openNear">Open the mapped one</button></div>' : ''}
+      </div>`;
+    }
+    return `<div class="detail">
+      <div class="detail-nav"><button class="link-btn" type="button" data-act="back">Back to list</button></div>
+      <h2 class="add-title">Add a missing bench</h2>
+      <p class="fine">Stand next to it and tap Add. A pin appears where you’re standing, and you can then drag it onto the exact spot.${companionOn() ? ` ${esc(cap(petName()))} gets ${GAME.addReward} snacks.` : ''}</p>
+      <p class="field-label">What is it?</p>
+      <div class="seg" role="group" aria-label="Type">${seg('addKind', 'bench', 'Bench', a.kind)}${seg('addKind', 'table', 'Picnic table', a.kind)}</div>
+      ${a.kind === 'bench' ? `<p class="field-label">Does it have a backrest?</p>
+      <div class="seg" role="group" aria-label="Backrest">${seg('addBack', 'yes', 'Yes', a.backrest)}${seg('addBack', 'no', 'No', a.backrest)}${seg('addBack', '', 'Not sure', a.backrest)}</div>` : ''}
+      <p class="field-label">How is it?</p>
+      ${starsRow(a.kind, a.rating || null, 'addRate', true)}
+      <button class="ck-btn" type="button" data-act="addHere"${a.busy || left <= 0 || !a.rating ? ' disabled' : ''}>${a.busy ? 'Checking your location…' : a.rating ? 'Add it here' : 'Choose a rating first'}</button>
+      <p class="ck-msg">${esc(a.msg || (left <= 0 ? `That’s ${GAME.addsPerDay} new pins today, the daily limit. Come back tomorrow.` : `${left} of ${GAME.addsPerDay} new pins left today.${TEST ? ' Test mode: the pin goes at the map centre.' : ''}`))}</p>
+      ${a.near ? '<div class="actions"><button type="button" class="plain" data-act="openNear">Open the mapped one</button></div>' : ''}
+    </div>`;
+  }
+
+  function detailHTML(s) {
+    const dir = `https://www.google.com/maps/dir/?api=1&destination=${s.lat},${s.lon}&travelmode=walking`;
+    const gone = `https://www.openstreetmap.org/note/new#map=19/${s.lat.toFixed(6)}/${s.lon.toFixed(6)}`;
+    const rows = measuredRows(s).map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join('');
+    return `<div class="detail">
+      <div class="detail-nav">
+        <button class="link-btn" type="button" data-act="back">Back to list</button>
+        <span class="dist">${fmtDist(s.dist)} away</span>
+      </div>
+      <p class="kind"><span class="dot" style="--c:${colorOf(s.kind)}" aria-hidden="true"></span>${s.members.length > 1 ? `${s.members.length} seats in one spot` : KIND_LABEL[s.kind]}${s.added ? ', added by you' : ''}</p>
+      ${summaryHTML(s.text, true)}
+      ${promising(s) ? '<p class="promise-line">Looks promising from its surroundings. Nobody has rated it yet, so be the first.</p>' : ''}
+      ${myTags(s.id).length ? `<p class="comfort">You noted: ${esc(myTags(s.id).map(tagLabel).join(', ').toLowerCase())}.</p>` : ''}
+      ${isSunsetSpot(s) && nextSunset() ? `<p class="comfort sunset-line">Sunset ${nextSunset().day} at ${hhmm(nextSunset().at)}.</p>` : ''}
+      ${checkinHTML(s)}
+      ${rerateHTML(s)}
+      ${tagsHTML(s)}
+      <div class="actions">
+        <a class="go" href="${dir}" target="_blank" rel="noopener">Directions</a>
+        ${typeof myRating(s.id) === 'number' && s.kind !== 'toilet' ? '<button type="button" class="plain" data-act="shareSpot">Share</button>' : ''}
+        ${s.added
+          ? `<a href="${gone}" target="_blank" rel="noopener">Tell OpenStreetMap</a>
+             <button type="button" class="plain" data-act="removeAdded">Remove my pin</button>`
+          : `<a href="${gone}" target="_blank" rel="noopener">Report as gone</a>`}
+      </div>
+      <details class="measured-box">
+        <summary>Measured from OpenStreetMap</summary>
+        <dl class="measured">${rows}</dl>
+      </details>
+    </div>`;
+  }
+
+  /* ---------- intro: three short screens on first open ---------- */
+  const INTRO_KEY = 'sitwell.intro.v1';
+  const benchArt = `<svg viewBox="0 0 200 140" role="img" aria-label="A bench under a tree">
+    <circle cx="160" cy="34" r="16" fill="#F2C94C"/>
+    <rect x="34" y="40" width="10" height="70" rx="3" fill="#8A6A56"/>
+    <circle cx="39" cy="34" r="30" fill="#6F9E6B"/><circle cx="20" cy="48" r="18" fill="#7FB07A"/><circle cx="58" cy="50" r="18" fill="#7FB07A"/>
+    <rect x="72" y="70" width="96" height="9" rx="3" fill="#A0672E"/>
+    <rect x="72" y="83" width="96" height="9" rx="3" fill="#A0672E"/>
+    <rect x="70" y="96" width="100" height="8" rx="3" fill="#8A5524"/>
+    <rect x="80" y="104" width="6" height="22" rx="2" fill="#4A3B30"/><rect x="154" y="104" width="6" height="22" rx="2" fill="#4A3B30"/>
+    <path d="M10 126 H190" stroke="#B7C9A8" stroke-width="4" stroke-linecap="round"/>
+  </svg>`;
+  const starsArt = `<svg viewBox="0 0 200 140" role="img" aria-label="Five stars">${[0, 1, 2, 3, 4].map(i =>
+    `<text x="${24 + i * 38}" y="88" font-size="40" text-anchor="middle" fill="${i < 4 ? '#E0A526' : '#E2DDD3'}">★</text>`).join('')}
+    <text x="100" y="120" font-size="14" text-anchor="middle" fill="#5E5950" font-family="IBM Plex Sans, Helvetica, sans-serif">4 stars: nice</text></svg>`;
+  const mapArt = `<svg viewBox="0 0 200 140" role="img" aria-label="A map with a few spots, one of them loved">
+    <rect x="16" y="14" width="168" height="112" rx="14" fill="#E9EFE2"/>
+    <path d="M16 92 C60 80 90 104 130 88 S184 70 184 70 V126 H16 Z" fill="#CFE3EE"/>
+    <path d="M40 14 C52 50 70 60 92 126" stroke="#FFFFFF" stroke-width="7" fill="none"/>
+    <circle cx="64" cy="48" r="7" fill="#2F5E43" stroke="#FFFFFF" stroke-width="2"/>
+    <circle cx="146" cy="44" r="7" fill="#2F5E43" stroke="#FFFFFF" stroke-width="2"/>
+    <circle cx="112" cy="80" r="11" fill="#2F5E43" stroke="#C4476A" stroke-width="4"/>
+    <circle cx="84" cy="102" r="6" fill="#A0672E" stroke="#FFFFFF" stroke-width="2" opacity=".5"/>
+  </svg>`;
+  const INTRO = [
+    { title: 'Find a lovely spot to linger', text: 'Sitwell shows benches, picnic tables and toilets nearby, and what’s around them: water, shade, a view, or a busy road.', art: () => benchArt },
+    { title: 'See which spots people love', text: 'Every spot is rated by people who actually sat there. Look for Lovely and Nice, or try a spot that looks promising and nobody has rated yet.', art: () => mapArt },
+    { title: 'Rate it when you’re there', text: 'Check in and give it stars. Every rating helps someone else find their perfect bench.', art: () => starsArt },
+  ];
+  function openIntro() {
+    state.intro = 1;
+    renderIntro();
+  }
+  function closeIntro(thenPick) {
+    state.intro = 0;
+    try { localStorage.setItem(INTRO_KEY, '1'); } catch (e) { /* ignore */ }
+    $('#intro').hidden = true;
+    if (thenPick && !me.raccoon) {
+      state.selected = null;
+      state.rtab = 'raccoon';
+      setMode('raccoon');
+      renderMarkers();
+    }
+  }
+  function renderIntro() {
+    const box = $('#intro');
+    if (!state.intro) { box.hidden = true; return; }
+    const i = state.intro - 1, step = INTRO[i], last = i === INTRO.length - 1;
+    box.hidden = false;
+    box.innerHTML = `<div class="intro-card" role="dialog" aria-modal="true" aria-labelledby="introTitle">
+      <div class="intro-art">${step.art()}</div>
+      <h2 id="introTitle" class="intro-title">${esc(step.title)}</h2>
+      <p class="intro-text">${esc(step.text)}</p>
+      <div class="intro-dots" aria-hidden="true">${INTRO.map((_, k) => `<span class="${k === i ? 'on' : ''}"></span>`).join('')}</div>
+      <div class="intro-actions">
+        <button type="button" class="link-btn" data-intro="skip">${last ? 'Close' : 'Skip'}</button>
+        <button type="button" class="ck-btn" data-intro="next">${last ? 'Start exploring' : 'Next'}</button>
+      </div>
+    </div>`;
+    box.querySelector('[data-intro="next"]').focus();
+  }
+  $('#intro').addEventListener('click', e => {
+    const b = e.target.closest('[data-intro]');
+    if (!b) return;
+    if (b.dataset.intro === 'skip') { closeIntro(false); return; }
+    if (state.intro >= INTRO.length) { closeIntro(false); return; }
+    state.intro += 1;
+    renderIntro();
+  });
+
+  /* ---------- share cards: a picture of a spot or of your raccoon ---------- */
+  function svgImage(svg, w, h) {
+    const src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg.replace('<svg ', `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" `));
+    return new Promise((res, rej) => {
+      const img = new Image();
+      const timer = setTimeout(() => rej(new Error('image took too long')), 4000);
+      img.onload = () => { clearTimeout(timer); res(img); };
+      img.onerror = e => { clearTimeout(timer); rej(e); };
+      img.src = src;
+    });
+  }
+  function wrapText(ctx, text, maxW) {
+    const words = text.split(' '), lines = [];
+    let line = '';
+    for (const w of words) {
+      const test = line ? line + ' ' + w : w;
+      if (ctx.measureText(test).width > maxW && line) { lines.push(line); line = w; } else line = test;
+    }
+    if (line) lines.push(line);
+    return lines;
+  }
+  async function shareCard(kind, s) {
+    const W = 1080, H = 1350;
+    const cv = document.createElement('canvas');
+    cv.width = W; cv.height = H;
+    const ctx = cv.getContext('2d');
+    try { await document.fonts.load('500 64px "IBM Plex Serif"'); await document.fonts.load('500 36px "IBM Plex Sans"'); } catch (e) { /* fallback fonts */ }
+    ctx.fillStyle = '#F6F4EF';
+    ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = '#FFFFFF';
+    ctx.beginPath(); ctx.roundRect ? ctx.roundRect(60, 60, W - 120, H - 120, 48) : ctx.rect(60, 60, W - 120, H - 120); ctx.fill();
+    const st = stageOf(me.total);
+    let holding = '';
+    if (kind === 'spot') { const v = visitsOf(s.id).filter(e => e.emoji).sort((a, b) => b.t - a.t)[0]; holding = v ? v.emoji : ''; }
+    try {
+      const pic = companionOn() && me.raccoon ? raccoonSVG({ look: look(), mood: 'happy', holding, worn: me.worn, scale: st.scale }) : benchArt;
+      const img = await svgImage(pic, 560, companionOn() && me.raccoon ? 509 : 392);
+      ctx.drawImage(img, (W - 560) / 2, companionOn() && me.raccoon ? 110 : 170, 560, companionOn() && me.raccoon ? 509 : 392);
+    } catch (e) { /* draw without the picture */ }
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#23211D';
+    let y = 690;
+    if (kind === 'spot') {
+      const r = myRating(s.id);
+      ctx.font = '72px "IBM Plex Serif", Georgia, serif';
+      ctx.fillStyle = '#E0A526';
+      ctx.fillText('★★★★★'.slice(0, r) + '☆☆☆☆☆'.slice(0, 5 - r), W / 2, y);
+      y += 80;
+      ctx.fillStyle = '#23211D';
+      ctx.font = '500 56px "IBM Plex Serif", Georgia, serif';
+      for (const line of wrapText(ctx, s.text.sentence, W - 240).slice(0, 4)) { ctx.fillText(line, W / 2, y); y += 70; }
+      const visit = visitsOf(s.id).find(e => e.place);
+      const tags = myTags(s.id).map(tagLabel).join(', ');
+      ctx.font = '36px "IBM Plex Sans", Helvetica, sans-serif';
+      ctx.fillStyle = '#5E5950';
+      y += 10;
+      if (visit) { ctx.fillText(stampLabel(visit.place), W / 2, y); y += 52; }
+      if (tags) { ctx.fillText(tags, W / 2, y); y += 52; }
+      ctx.fillText(`${companionOn() && me.raccoon ? cap(petName()) + ' rated' : 'Rated'} it ${starText(r)}: ${ratingWord(r, s.kind).toLowerCase()}`, W / 2, Math.max(y + 10, 1130));
+    } else {
+      const stamps = passportOf(me.visits).reduce((n, c) => n + c.stamps.length, 0);
+      const spots = new Set(me.visits.map(e => e.spot || e.id)).size;
+      ctx.font = '500 72px "IBM Plex Serif", Georgia, serif';
+      ctx.fillText(cap(petName()), W / 2, y + 20);
+      ctx.font = '40px "IBM Plex Sans", Helvetica, sans-serif';
+      ctx.fillStyle = '#5E5950';
+      ctx.fillText(`${st.label}, ${me.total} snacks eaten`, W / 2, y + 100);
+      ctx.fillText(`${spots} ${spots === 1 ? 'spot' : 'spots'} rated, ${stamps} passport ${stamps === 1 ? 'stamp' : 'stamps'}`, W / 2, y + 160);
+      const line = voiceOf(me.raccoon, 'happy');
+      ctx.font = 'italic 40px "IBM Plex Serif", Georgia, serif';
+      ctx.fillStyle = '#23211D';
+      let yy = y + 260;
+      for (const l of wrapText(ctx, `“${line}”`, W - 280)) { ctx.fillText(l, W / 2, yy); yy += 54; }
+    }
+    ctx.font = '600 40px "IBM Plex Sans", Helvetica, sans-serif';
+    ctx.fillStyle = '#2F5E43';
+    ctx.fillText('Sitwell', W / 2, H - 140);
+    ctx.font = '30px "IBM Plex Sans", Helvetica, sans-serif';
+    ctx.fillStyle = '#5E5950';
+    ctx.fillText('Find a lovely spot to linger', W / 2, H - 92);
+    const blob = await new Promise(res => cv.toBlob(res, 'image/png'));
+    if (!blob) return;
+    const file = new File([blob], kind === 'spot' ? 'sitwell-spot.png' : 'sitwell-raccoon.png', { type: 'image/png' });
+    try {
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        await navigator.share({ files: [file], title: 'Sitwell' });
+        return;
+      }
+    } catch (e) {
+      if (e && e.name === 'AbortError') return;
+    }
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = file.name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 30000);
+  }
+
+  /* ---------- interaction ---------- */
+  function setMode(mode) {
+    if (mode !== 'add') clearPlacing();
+    state.mode = mode;
+    renderPanel();
+  }
+
+  // Centre the pin in the part of the map the sheet doesn't cover.
+  function reveal(s) {
+    const ll = L.latLng(s.lat, s.lon);
+    const opts = { animate: !reduceMotion };
+    if (wide.matches) {
+      if (!map.getBounds().pad(-0.15).contains(ll)) map.panTo(ll, opts);
+      return;
+    }
+    const z = Math.max(map.getZoom(), CLUSTER_MAX_ZOOM + 1);
+    const h = $('#panel').offsetHeight;
+    const p = map.project(ll, z).add([0, h / 2]);
+    map.setView(map.unproject(p, z), z, opts);
+  }
+
+  function openSpot(id) {
+    const s = state.spots.find(x => x.id === id);
+    if (!s) return;
+    state.selected = id;
+    state.ckMsg = '';
+    state.reveal = null;
+    state.rateFor = null;
+    setMode('detail');
+    renderMarkers();
+    $('#panelBody').scrollTop = 0;
+    requestAnimationFrame(() => reveal(s));
+  }
+
+  // Location confirmed: ask for the rating.
+  function verified(s) {
+    state.rateFor = s.id;
+    state.reveal = null;
+    state.ckMsg = '';
+    renderPanel();
+  }
+
+  function saveRating(s, rating) {
+    const now = Date.now();
+    state.rateFor = null;
+    const base = { t: now, spot: s.id, lat: +s.lat.toFixed(6), lon: +s.lon.toFixed(6), rating, where: s.text.sentence, kind: s.kind, place: null };
+    let ev;
+    if (!visited(s.id)) {
+      // A new spot: the snack, golden snacks, trinkets and streak bonus all come from here.
+      const r = s.kind === 'toilet' ? rollToilet(s.id, now) : rollCheckin(s.id, now, me.newSpots, me.trinkets);
+      ev = record(Object.assign({
+        type: 'checkin', emoji: r.snack.emoji, name: r.snack.name, rare: r.snack.rare, value: r.value,
+        first: true, streakBonus: r.streakBonus, trinket: r.trinket,
+      }, base));
+      state.reveal = Object.assign({ id: s.id, t: now, stamp: null, rating }, r);
+    } else {
+      ev = record(Object.assign({ type: 'checkin', value: 0, revisit: true }, base));
+      state.reveal = { id: s.id, t: now, revisit: true, rating, stamp: null };
+    }
+    renderPanel();
+    renderMarkers();
+    if (s.kind !== 'toilet') queuePlace(ev);
+  }
+
+  function checkIn(s) {
+    if (state.checking) return;
+    if (TEST) { verified(s); return; }
+    if (!('geolocation' in navigator)) {
+      state.ckMsg = 'This browser can’t share your location, so checking in isn’t possible.';
+      renderPanel();
+      return;
+    }
+    state.checking = true;
+    state.ckMsg = '';
+    renderPanel();
+    navigator.geolocation.getCurrentPosition(pos => {
+      state.checking = false;
+      if (state.selected !== s.id) return;
+      const { latitude, longitude, accuracy } = pos.coords;
+      drawUser({ lat: latitude, lon: longitude }, accuracy);
+      state.user = { lat: latitude, lon: longitude };
+      const d = Math.min(...s.members.map(mb => metres(latitude, longitude, mb.lat, mb.lon)));
+      if (accuracy > GAME.maxAccuracy) {
+        state.ckMsg = `Your location is only accurate to about ${Math.round(accuracy)} m. Try again from a more open spot.`;
+      } else if (d > GAME.checkinRadius + Math.min(accuracy, GAME.accuracySlack)) {
+        state.ckMsg = `You’re about ${fmtDist(d)} away. Get within ${GAME.checkinRadius} m to check in.`;
+      } else {
+        verified(s);
+        return;
+      }
+      renderPanel();
+    }, err => {
+      state.checking = false;
+      state.ckMsg = err.code === 1
+        ? 'Location access is blocked for this page, so checking in isn’t possible.'
+        : 'Couldn’t get your location. Try again in a moment.';
+      renderPanel();
+    }, { enableHighAccuracy: true, timeout: 15000, maximumAge: 10000 });
+  }
+
+  /* ---------- placing a new pin ---------- */
+  let pinMarker = null, fixCircle = null;
+
+  function pinDistText() {
+    const a = state.add;
+    if (!a.fix || !a.pin) return '';
+    const d = metres(a.fix.lat, a.fix.lon, a.pin.lat, a.pin.lon);
+    return d < 3 ? 'It’s where you’re standing now.' : `It’s now ${fmtDist(d)} from you.`;
+  }
+
+  // Keeps the pin within reach of where you're standing.
+  function clampToFix(lat, lon) {
+    const f = state.add.fix;
+    const d = metres(f.lat, f.lon, lat, lon);
+    if (d <= GAME.addMaxDistance) return { lat, lon };
+    const k = GAME.addMaxDistance / d;
+    return { lat: f.lat + (lat - f.lat) * k, lon: f.lon + (lon - f.lon) * k };
+  }
+
+  function movePin(lat, lon) {
+    const a = state.add;
+    if (!a.fix) return;
+    a.pin = clampToFix(lat, lon);
+    if (pinMarker) pinMarker.setLatLng([a.pin.lat, a.pin.lon]);
+    a.msg = '';
+    a.near = null;
+    const el = document.getElementById('pinDist');
+    if (el) el.textContent = pinDistText();
+    const msg = document.querySelector('#panelBody .ck-msg');
+    if (msg) msg.textContent = '';
+  }
+
+  function clearPlacing() {
+    if (pinMarker) { pinMarker.remove(); pinMarker = null; }
+    if (fixCircle) { fixCircle.remove(); fixCircle = null; }
+  }
+
+  function enterPlacing(lat, lon) {
+    const a = state.add;
+    a.fix = { lat, lon };
+    a.pin = { lat, lon };
+    a.step = 'place';
+    a.msg = '';
+    a.near = null;
+    clearPlacing();
+    fixCircle = L.circle([lat, lon], {
+      radius: GAME.addMaxDistance, color: css('--ink-2'), weight: 1.5, dashArray: '4 5',
+      fillColor: css('--ink-3'), fillOpacity: 0.06, interactive: false,
+    }).addTo(map);
+    pinMarker = L.marker([lat, lon], {
+      draggable: true,
+      autoPan: true,
+      keyboard: true,
+      title: 'New pin, drag to move',
+      icon: L.divIcon({
+        className: 'drop-pin-wrap',
+        html: `<div class="drop-pin" style="--c:${colorOf(a.kind)}"></div>`,
+        iconSize: [30, 30],
+        iconAnchor: [15, 36],
+      }),
+      zIndexOffset: 1000,
+    }).addTo(map);
+    pinMarker.on('drag', e => {
+      const ll = e.target.getLatLng();
+      const c = clampToFix(ll.lat, ll.lng);
+      if (c.lat !== ll.lat || c.lon !== ll.lng) e.target.setLatLng([c.lat, c.lon]);
+      a.pin = c;
+      const el = document.getElementById('pinDist');
+      if (el) el.textContent = pinDistText();
+    });
+    pinMarker.on('dragend', e => {
+      const ll = e.target.getLatLng();
+      movePin(ll.lat, ll.lng);
+    });
+    renderPanel();
+    // Zoom in close, with the pin above the bottom sheet on phones.
+    requestAnimationFrame(() => {
+      const z = 19, ll = L.latLng(lat, lon);
+      const h = wide.matches ? 0 : $('#panel').offsetHeight;
+      map.setView(map.unproject(map.project(ll, z).add([0, h / 2]), z), z, { animate: !reduceMotion });
+    });
+  }
+
+  function confirmPin() {
+    const a = state.add;
+    if (!a.pin) return;
+    placeNewPin(a.pin.lat, a.pin.lon);
+  }
+
+  function placeNewPin(lat, lon) {
+    const a = state.add, now = Date.now();
+    let nearest = null;
+    for (const s of state.spots) {
+      if (s.kind === 'toilet') continue;
+      for (const mb of s.members) {
+        const d = metres(lat, lon, mb.lat, mb.lon);
+        if (!nearest || d < nearest.d) nearest = { s, mb, d };
+      }
+    }
+    if (nearest && nearest.d < GAME.addMinGap) {
+      a.msg = `There’s already a ${nearest.mb.kind === 'table' ? 'picnic table' : 'bench'} mapped ${fmtDist(nearest.d)} from the pin. It’s probably part of this spot.`;
+      a.near = nearest.s.id;
+      renderPanel();
+      return;
+    }
+    const tags = a.kind === 'bench' && a.backrest ? { backrest: a.backrest } : {};
+    const rec = record({ type: 'add', t: now, id: 'user/' + now, kind: a.kind, lat: +lat.toFixed(6), lon: +lon.toFixed(6), tags, rating: a.rating, value: GAME.addReward, place: null });
+    queuePlace(rec);
+    a.done = rec.id;
+    a.step = 'form';
+    a.msg = '';
+    a.near = null;
+    clearPlacing();
+    refresh();
+  }
+
+  function addHere() {
+    const a = state.add;
+    if (a.busy) return;
+    if (me.adds.filter(e => dayKey(new Date(e.t)) === today()).length >= GAME.addsPerDay) { renderPanel(); return; }
+    a.msg = '';
+    a.near = null;
+    if (TEST) {
+      const c = map.getCenter();
+      enterPlacing(c.lat, c.lng);
+      return;
+    }
+    if (!('geolocation' in navigator)) {
+      a.msg = 'This browser can’t share your location, so adding isn’t possible.';
+      renderPanel();
+      return;
+    }
+    a.busy = true;
+    renderPanel();
+    navigator.geolocation.getCurrentPosition(pos => {
+      a.busy = false;
+      const { latitude, longitude, accuracy } = pos.coords;
+      drawUser({ lat: latitude, lon: longitude }, accuracy);
+      state.user = { lat: latitude, lon: longitude };
+      if (accuracy > GAME.addMaxAccuracy) {
+        a.msg = `Your location is only accurate to about ${Math.round(accuracy)} m, and a new pin needs ${GAME.addMaxAccuracy} m or better. Try again from a more open spot.`;
+        renderPanel();
+        return;
+      }
+      if (!state.center || metres(latitude, longitude, state.center.lat, state.center.lon) > SEARCH_RADIUS - 100 || state.phase !== 'ready') {
+        a.msg = 'Updating the map around you first, so new pins don’t duplicate mapped ones. Tap Add again in a moment.';
+        map.setView([latitude, longitude], Math.max(map.getZoom(), 16), { animate: false });
+        showAround({ lat: latitude, lon: longitude }, 'you');
+        return;
+      }
+      enterPlacing(latitude, longitude);
+    }, err => {
+      a.busy = false;
+      a.msg = err.code === 1
+        ? 'Location access is blocked for this page, so adding isn’t possible.'
+        : 'Couldn’t get your location. Try again in a moment.';
+      renderPanel();
+    }, { enableHighAccuracy: true, timeout: 15000, maximumAge: 5000 });
+  }
+
+  function closeOverlay() {
+    state.selected = null;
+    state.reveal = null;
+    setMode(wide.matches ? 'peek' : 'list');
+    renderMarkers();
+  }
+
+  $('#panelBody').addEventListener('click', e => {
+    const el = e.target.closest('[data-act]');
+    if (!el) return;
+    const act = el.dataset.act;
+    if (act === 'open') {
+      openSpot(el.dataset.id);
+    } else if (act === 'back') {
+      closeOverlay();
+    } else if (act === 'addKind') {
+      state.add.kind = el.dataset.v;
+      renderPanel();
+    } else if (act === 'addBack') {
+      state.add.backrest = el.dataset.v;
+      renderPanel();
+    } else if (act === 'addRate') {
+      state.add.rating = Number(el.dataset.v);
+      renderPanel();
+    } else if (act === 'addHere') {
+      addHere();
+    } else if (act === 'addConfirm') {
+      confirmPin();
+    } else if (act === 'addCancel') {
+      clearPlacing();
+      Object.assign(state.add, { step: 'form', fix: null, pin: null, msg: '', near: null });
+      renderPanel();
+    } else if (act === 'openAdded') {
+      const id = state.add.done;
+      state.add.done = null;
+      openSpot(id);
+    } else if (act === 'openNear') {
+      const id = state.add.near;
+      state.add.near = null;
+      state.add.msg = '';
+      openSpot(id);
+    } else if (act === 'removeAdded') {
+      const s = selectedSpot();
+      if (!s || !s.added || s.members.length > 1) return;
+      if (!confirm(`Remove this pin? Your raccoon gives back its ${GAME.addReward} snacks.`)) return;
+      record({ type: 'remove', t: Date.now(), id: s.id });
+      state.selected = null;
+      state.mode = wide.matches ? 'peek' : 'list';
+      refresh();
+    } else if (act === 'rtab') {
+      state.rtab = el.dataset.v;
+      renderPanel();
+      $('#panelBody').scrollTop = 0;
+    } else if (act === 'pickSel') {
+      state.pickSel = el.dataset.v;
+      const top = $('#panelBody').scrollTop;
+      renderPanel();
+      $('#panelBody').scrollTop = top;
+    } else if (act === 'pickConfirm') {
+      const sel = state.pickSel || me.raccoon;
+      if (!sel) return;
+      if (sel !== me.raccoon) record({ type: 'profile', t: Date.now(), raccoon: sel });
+      state.picking = false;
+      state.pickSel = null;
+      state.rtab = 'raccoon';
+      renderPanel();
+      $('#panelBody').scrollTop = 0;
+    } else if (act === 'pickBack') {
+      state.picking = false;
+      state.pickSel = null;
+      renderPanel();
+    } else if (act === 'openPick' || act === 'openRaccoon' || act === 'openWardrobe') {
+      state.selected = null;
+      state.reveal = null;
+      state.picking = act === 'openPick' && !!me.raccoon;
+      state.pickSel = null;
+      state.rtab = act === 'openWardrobe' ? 'wardrobe' : 'raccoon';
+      setMode('raccoon');
+      renderMarkers();
+      $('#panelBody').scrollTop = 0;
+    } else if (act === 'wear') {
+      const slot = el.dataset.slot, id = el.dataset.v;
+      record({ type: 'wear', t: Date.now(), slot, item: me.worn[slot] === id ? null : id });
+      const top = $('#panelBody').scrollTop;
+      renderPanel();
+      $('#panelBody').scrollTop = top;
+    } else if (act === 'companionYes' || (act === 'companion' && !companionOn())) {
+      record({ type: 'companion', t: Date.now(), on: true });
+      state.selected = null;
+      state.reveal = null;
+      state.picking = !!me.raccoon ? false : true;
+      state.rtab = 'raccoon';
+      setMode('raccoon');
+      renderMarkers();
+      $('#panelBody').scrollTop = 0;
+    } else if (act === 'companionNo' || act === 'companion') {
+      record({ type: 'companion', t: Date.now(), on: false });
+      state.rtab = 'rated';
+      renderPanel();
+      renderMarkers();
+    } else if (act === 'sort') {
+      state.sortBy = el.dataset.v;
+      state.shown = PAGE;
+      renderPanel();
+    } else if (act === 'tag') {
+      const s = selectedSpot();
+      if (!s || !canRerate(s.id)) return;
+      const cur = new Set(myTags(s.id));
+      if (cur.has(el.dataset.v)) cur.delete(el.dataset.v); else cur.add(el.dataset.v);
+      record({ type: 'tags', t: Date.now(), spot: s.id, lat: +s.lat.toFixed(6), lon: +s.lon.toFixed(6), tags: [...cur] });
+      const top = $('#panelBody').scrollTop;
+      renderPanel();
+      $('#panelBody').scrollTop = top;
+    } else if (act === 'shareSpot') {
+      const s = selectedSpot();
+      if (s) shareCard('spot', s);
+    } else if (act === 'shareRaccoon') {
+      shareCard('raccoon');
+    } else if (act === 'showIntro') {
+      openIntro();
+    } else if (act === 'rateTab') {
+      state.rateTab = el.dataset.v;
+      renderPanel();
+    } else if (act === 'openVoted') {
+      const x = state.votedList[Number(el.dataset.i)];
+      if (!x) return;
+      if (x.live) { openSpot(x.live.id); return; }
+      // Not in the loaded area: jump there, load it, then open the spot.
+      state.pendingOpen = { lat: x.lat, lon: x.lon };
+      state.selected = null;
+      state.mode = wide.matches ? 'peek' : 'list';
+      map.setView([x.lat, x.lon], 17, { animate: false });
+      showAround({ lat: x.lat, lon: x.lon }, 'that spot');
+    } else if (act === 'showVisited') {
+      state.need.visited = true;
+      closeOverlay();
+      render();
+    } else if (act === 'checkin') {
+      const s = selectedSpot();
+      if (s) checkIn(s);
+    } else if (act === 'rename') {
+      const n = prompt('What should your raccoon be called?', petName());
+      if (n !== null) {
+        record({ type: 'profile', t: Date.now(), name: n.trim().slice(0, 24) });
+        renderPanel();
+      }
+    } else if (act === 'more') {
+      state.shown += PAGE;
+      renderPanel();
+    } else if (act === 'retry') {
+      showAround(state.center, state.place);
+    } else if (act === 'rate') {
+      const s = selectedSpot();
+      if (!s || state.rateFor !== s.id) return;
+      saveRating(s, toNum(el.dataset.v));
+    } else if (act === 'rerate') {
+      const s = selectedSpot();
+      if (!s || !canRerate(s.id)) return;
+      const rating = toNum(el.dataset.v);
+      record({ type: 'rate', t: Date.now(), spot: s.id, lat: +s.lat.toFixed(6), lon: +s.lon.toFixed(6), rating, where: s.text.sentence, kind: s.kind });
+      if (state.reveal && state.reveal.id === s.id) state.reveal.rating = rating;
+      const top = $('#panelBody').scrollTop;
+      renderPanel();
+      renderMarkers();
+      $('#panelBody').scrollTop = top;
+    } else if (act === 'reset') {
+      if (!confirm('Start fresh? This clears your raccoon, snacks, ratings, pins and stamps on this phone.')) return;
+      for (const k of [EVENTS_KEY, 'pause.raccoon.v1', 'pause.votes.v1', 'pause.added.v1']) {
+        try { localStorage.removeItem(k); } catch (e) { /* ignore */ }
+      }
+      events = [];
+      me = deriveState(events);
+      placeQueue.length = 0;
+      Object.assign(state, { reveal: null, rateFor: null, picking: false, pickSel: null, rtab: 'raccoon', selected: null });
+      updateRaccoonButton();
+      refresh();
+      setMode('raccoon');
+      $('#panelBody').scrollTop = 0;
+    }
+  });
+
+  $('#sunsetBanner').addEventListener('click', e => {
+    const b = e.target.closest('[data-sun]');
+    if (!b) return;
+    if (b.dataset.sun === 'show') {
+      state.need.sunset = true;
+      state.shown = PAGE;
+      if (state.mode === 'peek' && !wide.matches) state.mode = 'list';
+      render();
+    } else {
+      state.sunsetHidden = dayKey(new Date());
+      renderSunsetBanner();
+    }
+  });
+  // Check every few minutes whether the sunset banner should appear.
+  setInterval(() => { if (state.phase === 'ready') renderSunsetBanner(); }, 5 * 60000);
+
+  $('#panelToggle').addEventListener('click', () => {
+    state.reveal = null;
+    if (state.mode === 'peek') setMode('list');
+    else {
+      state.selected = null;
+      setMode('peek');
+      renderMarkers();
+    }
+  });
+
+  document.querySelectorAll('.chip').forEach(btn => btn.addEventListener('click', () => {
+    if (btn.dataset.type) state.types[btn.dataset.type] = !state.types[btn.dataset.type];
+    else state.need[btn.dataset.need] = !state.need[btn.dataset.need];
+    state.shown = PAGE;
+    const sel = selectedSpot();
+    if (sel && !passes(sel)) {
+      state.selected = null;
+      if (state.mode === 'detail') state.mode = 'peek';
+    }
+    render();
+  }));
+
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && state.intro) { closeIntro(false); return; }
+    if (e.key === 'Escape' && ['detail', 'raccoon', 'add'].includes(state.mode)) closeOverlay();
+  });
+
+  $('#addBtn').addEventListener('click', () => {
+    if (state.mode === 'add') { closeOverlay(); return; }
+    state.selected = null;
+    state.reveal = null;
+    state.add = { kind: 'bench', backrest: '', rating: '', msg: '', near: null, done: null, busy: false, step: 'form', fix: null, pin: null };
+    setMode('add');
+    renderMarkers();
+    $('#panelBody').scrollTop = 0;
+  });
+
+  $('#raccoonBtn').addEventListener('click', () => {
+    if (state.mode === 'raccoon') { closeOverlay(); return; }
+    state.selected = null;
+    state.reveal = null;
+    state.picking = false;
+    state.pickSel = null;
+    state.rtab = companionOn() ? 'raccoon' : 'rated';
+    setMode('raccoon');
+    renderMarkers();
+    $('#panelBody').scrollTop = 0;
+  });
+  updateRaccoonButton();
+
+  wide.addEventListener('change', () => renderPanel());
+
+  $('#searchHere').addEventListener('click', () => {
+    const c = map.getCenter();
+    showAround({ lat: c.lat, lon: c.lng }, 'the map centre');
+  });
+
+  function drawUser(c, accuracy) {
+    if (userMarker) userMarker.remove();
+    userMarker = L.layerGroup([
+      L.circle([c.lat, c.lon], { radius: Math.min(accuracy || 0, 200), color: '#3A7BD5', weight: 0, fillOpacity: 0.12, interactive: false }),
+      L.circleMarker([c.lat, c.lon], { radius: 7, color: '#FFFFFF', weight: 2.5, fillColor: '#3A7BD5', fillOpacity: 1, interactive: false }),
+    ]).addTo(map);
+  }
+
+  function locate(auto) {
+    if (!('geolocation' in navigator)) {
+      if (auto) showAround(ZURICH, 'Zurich centre');
+      else $('#status').textContent = 'This browser can’t share your location. Move the map and tap Search this area.';
+      return;
+    }
+    $('#locate').disabled = true;
+    if (auto) {
+      state.phase = 'locating';
+      render();
+    }
+    navigator.geolocation.getCurrentPosition(pos => {
+      $('#locate').disabled = false;
+      const c = { lat: pos.coords.latitude, lon: pos.coords.longitude };
+      drawUser(c, pos.coords.accuracy);
+      state.user = c;
+      map.setView([c.lat, c.lon], 16, { animate: false });
+      showAround(c, 'you');
+    }, err => {
+      $('#locate').disabled = false;
+      const why = err.code === 1 ? 'Location access is blocked for this page.' : 'Your location isn’t available right now.';
+      if (auto) showAround(ZURICH, 'Zurich centre');
+      else $('#status').textContent = `${why} Move the map and tap Search this area instead.`;
+    }, { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 });
+  }
+
+  $('#locate').addEventListener('click', () => locate(false));
+  locate(true);
+  try { if (!localStorage.getItem(INTRO_KEY)) openIntro(); } catch (e) { /* ignore */ }
+})();
+</script>
+</body>
+</html>

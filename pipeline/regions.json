@@ -1,0 +1,18 @@
+{
+  "regions": [
+    {
+      "code": "CH",
+      "name": "Switzerland",
+      "iso": "CH",
+      "url": "https://download.geofabrik.de/europe/switzerland-latest.osm.pbf",
+      "poly": "https://download.geofabrik.de/europe/switzerland.poly"
+    },
+    {
+      "code": "HR",
+      "name": "Croatia",
+      "iso": "HR",
+      "url": "https://download.geofabrik.de/europe/croatia-latest.osm.pbf",
+      "poly": "https://download.geofabrik.de/europe/croatia.poly"
+    }
+  ]
+}

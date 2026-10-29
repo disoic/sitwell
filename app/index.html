@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Sitwell: find a lovely spot to linger</title>
+<meta name="description" content="Benches, picnic tables and toilets nearby, described by what is around them: sunsets over the water, shade, quiet, and what people who sat there thought.">
+<meta name="theme-color" content="#F6F4EF">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'>
+<link rel="stylesheet" href="vendor/maplibre-gl.css">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body data-sheet="peek">
+<div id="map" role="region" aria-label="Map of places to sit"></div>
+
+<header class="top">
+  <div class="search">
+    <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/></svg>
+    <label for="q" class="sr-only">Search a place</label>
+    <input id="q" type="search" placeholder="Search a place" autocomplete="off" enterkeyhint="search">
+    <ul id="results" class="results" hidden></ul>
+  </div>
+  <button id="mine" class="round" type="button" aria-label="My spots">
+    <svg aria-hidden="true" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M12 20s-7-4.4-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.6-7 10-7 10z"/></svg>
+  </button>
+</header>
+
+<button id="here" class="here" type="button" hidden>Search this area</button>
+<button id="locate" class="round locate" type="button" aria-label="Show my location">
+  <svg aria-hidden="true" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="6.5"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3"/><circle cx="12" cy="12" r="1.6" fill="currentColor"/></svg>
+</button>
+
+<section id="sheet" class="sheet" aria-label="Spots">
+  <button id="handle" class="handle" type="button" aria-label="Show more or fewer spots"></button>
+  <div id="sheet-body"></div>
+</section>
+
+<div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+<script src="vendor/maplibre-gl.js"></script>
+<script src="core.js"></script>
+<script src="present.js"></script>
+<script src="data.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
