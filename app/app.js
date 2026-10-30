@@ -6,19 +6,23 @@
    ============================================================ */
 (function () {
   'use strict';
-  const C = window.SitwellCore, P = window.SitwellPresent, D = window.SitwellData;
+  const C = window.SitwellCore, P = window.SitwellPresent, D = window.SitwellData, G = window.SitwellGuide;
   const $ = s => document.querySelector(s);
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
   const TEST = new URLSearchParams(location.search).has('test');   // ?test: check in without being there
+  // How long you stay at a spot before the app asks how it is (minutes; ?dwell= changes it for testing).
+  const DWELL = (Number(new URLSearchParams(location.search).get('dwell')) || 10) * 60000;
   const ZURICH = { lat: 47.3686, lon: 8.5392 };
   const RADIUS = { walk: 1600, bike: 4500 };
   const SPEED = { walk: 80, bike: 250 };   // metres per minute
-  const GAME = { checkinRadius: 40, accuracySlack: 25, maxAccuracy: 75, rateWindowHours: 24 };
-  const KEYS = { events: 'pause.events.v1', saved: 'sitwell.saved.v1', mode: 'sitwell.mode.v1', located: 'sitwell.located.v1' };
+  const GAME = { checkinRadius: 40, accuracySlack: 25, maxAccuracy: 75, rateWindowHours: 24,
+    addMaxDistance: 40, addMinGap: 15, addsPerDay: 10, addMaxAccuracy: 30 };
+  const KEYS = { events: 'pause.events.v1', saved: 'sitwell.saved.v1', mode: 'sitwell.mode.v1', located: 'sitwell.located.v1',
+    pins: 'sitwell.pinm.v1', install: 'sitwell.install.v1', wishNo: 'sitwell.wishno.v1', dwell: 'sitwell.dwell.v1' };
   const WORDS = { seat: ['Not worth it', 'Meh', 'Okay', 'Nice', 'Lovely'], toilet: ['Avoid', 'Grim', 'Okay', 'Clean', 'Spotless'] };
   const TAGS = [['view', 'View'], ['quiet', 'Quiet'], ['sunset', 'Sunset'], ['fortwo', 'For two'], ['shade', 'Shade'], ['sun', 'Sunny'], ['picnic', 'Picnics'], ['kids', 'Kids']];
   const STYLE_URL = 'https://tiles.openfreemap.org/styles/positron';
-  const OVERLAYS = ['spot', 'arrive', 'meet', 'mine', 'invite'];
+  const OVERLAYS = ['spot', 'arrive', 'meet', 'mine', 'invite', 'add', 'page'];
 
   /* ---------- icons ---------- */
   const PATHS = {
@@ -44,6 +48,8 @@
     bin: '<path d="M5 7h14M9 7V4.5h6V7M7 7l1 13h8l1-13"/>',
     warn: '<path d="M12 4 21 19H3z"/><path d="M12 10v4M12 17v.5"/>',
     star: '<path d="M12 3.5l2.6 5.3 5.9.9-4.3 4.1 1 5.8L12 16.9l-5.2 2.7 1-5.8-4.3-4.1 5.9-.9z"/>',
+    spark: '<path d="M12 3v4M12 17v4M3 12h4M17 12h4M6 6l2.5 2.5M15.5 15.5 18 18M6 18l2.5-2.5M15.5 8.5 18 6"/>',
+    close: '<path d="M6 6l12 12M18 6 6 18"/>',
   };
   function icon(name, size = 22, color = 'currentColor', width = 1.8, fill = 'none') {
     return `<svg aria-hidden="true" width="${size}" height="${size}" viewBox="0 0 24 24" fill="${fill}" stroke="${color}" stroke-width="${width}" stroke-linecap="round" stroke-linejoin="round">${PATHS[name] || ''}</svg>`;
@@ -96,6 +102,7 @@
     weather: null, weatherKey: '', weatherTime: 0, sunset: null, outlook: null,
     loading: true, uncovered: false, error: '', invite: null, pendingOpen: null,
     placeList: null, fastFixes: 0, autoBike: false, lastRankAt: 0, programmatic: false,
+    liveLoading: 0, liveError: '', add: null, pad: null, pageKey: null, keepView: false,
   };
 
   /* ---------- small helpers ---------- */
@@ -161,7 +168,10 @@
       if (mine != null) out.unshift('You said: ' + wordFor(mine, 'toilet'));
       return out.length ? out.slice(0, 2).join(', ').replace(/^./, c => c.toUpperCase()) : 'Public toilet';
     }
-    if (why.includes('sunset')) out.push('Sunset over ' + P.waterWord(m));
+    if (why.includes('sunset')) {
+      const g = P.sunGone(s, new Date());
+      out.push(g && g.measured && g.early >= 3 ? `Sun leaves at ${hhmm(g.at)}, over ${P.waterWord(m)}` : 'Sunset over ' + P.waterWord(m));
+    }
     if (why.includes('roofed')) out.push('Roofed');
     if (why.includes('shade')) out.push('Shaded');
     if (why.includes('sun')) out.push('In the sun');
@@ -238,19 +248,26 @@
     state.sunset = t;
     state.outlook = state.weather && t ? P.sunsetOutlook(P.forecastAt(state.weather, t)) : null;
   }
-  const sunsetSoon = (now = new Date()) => !!state.sunset && (state.sunset - now) / 60000 <= 90 && (state.sunset - now) / 60000 >= -10;
+  const sunsetSoon = (now = new Date()) => !!state.sunset && (state.sunset - now) / 60000 <= 120 && (state.sunset - now) / 60000 >= -10;
+  // A sun on the map: this spot's own sunset is within the next 90 minutes, over open water.
+  function sunNow(s, now) {
+    if (s.kind === 'toilet' || !s.rays) return false;
+    const g = P.sunGone(s, now), m = g ? (g.at - now) / 60000 : Infinity;
+    return m <= 90 && m >= -5 && P.sunsetToday(s, now);
+  }
   function contextLine() {
     const now = new Date();
+    if (navigator.onLine === false) return { icon: '', text: 'You’re offline. Spots you’ve opened before still show.' };
     if (state.filter === 'toilet') return { icon: '', text: 'Nearest toilets first.' };
     if (state.sort === 'near') return { icon: '', text: 'Nearest spots first.' };
-    if (state.filter === 'sunset' && state.sunset) return { icon: icon('sun', 18, '#B35A12', 2), text: `Sunset at ${hhmm(state.sunset)}. These spots face it over open water.` };
+    if (state.filter === 'sunset' && state.sunset) return { icon: icon('sun', 18, '#B35A12', 2), text: `Sunset around ${hhmm(state.sunset)}. These spots face it over open water; each card says when the sun leaves it.` };
     const w = state.weather ? P.forecastAt(state.weather, now) : null, sun = state.sunset;
     if (sun && sunsetSoon(now)) {
       const q = state.outlook ? state.outlook.quality : null;
       const any = state.ranked.some(r => r.reasons.includes('sunset'));
-      if (q != null && q <= 0.1) return { icon: icon('sun', 18, '#B35A12', 2), text: `Sunset at ${hhmm(sun)}, but ${q === 0 ? 'rain is likely' : 'it looks overcast'}.` };
+      if (q != null && q <= 0.1) return { icon: icon('sun', 18, '#B35A12', 2), text: `Sunset around ${hhmm(sun)}, but ${q === 0 ? 'rain is likely' : 'it looks overcast'}.` };
       const sky = q == null ? '' : q >= 1 ? ' with high clouds that could colour up' : q >= 0.8 ? ' with a clear sky' : ' with some clouds';
-      return { icon: icon('sun', 18, '#B35A12', 2), text: any ? `Sunset at ${hhmm(sun)}${sky}, so sunset spots come first.` : `Sunset at ${hhmm(sun)}${sky}. No spots nearby face it over open water.` };
+      return { icon: icon('sun', 18, '#B35A12', 2), text: any ? `The sun goes down soon${sky}, so sunset spots come first.` : `Sunset around ${hhmm(sun)}${sky}. No spots nearby face it over open water.` };
     }
     if (w && w.precip >= 0.2) return { icon: icon('rain', 18, '#2F6496', 2), text: "It's raining, so roofed spots come first." };
     if (w && w.temp >= 26) return { icon: icon('heat', 18, '#B35A12', 2), text: `It's ${Math.round(w.temp)}° out, so shady spots come first.` };
@@ -273,14 +290,17 @@
     try { r = await source.spotsAround(state.center, RADIUS[state.mode] + 300); } catch (e) { r = { spots: [], uncovered: [], failed: ['all'], error: e }; }
     if (token !== loadToken) return;
     state.loading = false;
-    state.spots = r.spots.map(ready);
+    state.spots = r.spots.map(ready).concat(pinsNear(state.center, RADIUS[state.mode] + 300));
     state.byId = new Map(state.spots.map(s => [s.id, s]));
-    state.uncovered = r.uncovered.length > 0;
-    state.error = !r.spots.length && r.failed.length
-      ? (r.error && r.error.status === 404 ? 'Spot data isn’t published yet.' : 'Couldn’t load spots. Check your connection and try again.') : '';
+    state.liveLoading = r.pending.length;
+    state.liveError = '';
+    state.error = !r.spots.length && r.failed.length && !r.pending.length
+      ? (navigator.onLine === false ? 'You’re offline, and this area hasn’t been opened before.' : 'Couldn’t load spots. Check your connection and try again.') : '';
     computeSunset();
     rank();
     drawSpots();
+    if (r.pending.length) fetchLiveSquares(r.pending, token);
+    measureMissingPins();
     if (state.invite && !state.invite.spot) {
       state.invite.spot = findSpot(state.invite);
       if (state.invite.spot) { state.selected = state.invite.spot.id; drawSpots(); }
@@ -421,6 +441,7 @@
     map.on('click', 'spots-hit', e => { const f = e.features && e.features[0]; if (f) openSpot(f.properties.id, false); });
     map.on('mouseenter', 'spots-hit', () => { map.getCanvas().style.cursor = 'pointer'; });
     map.on('mouseleave', 'spots-hit', () => { map.getCanvas().style.cursor = ''; });
+    map.on('move', () => { if (state.sheet === 'add') updateAddStatus(); });
     mapReady = true;
     drawSpots();
     drawMe();
@@ -432,7 +453,7 @@
     const features = shown.map(s => ({
       type: 'Feature', geometry: { type: 'Point', coordinates: [s.lon, s.lat] },
       properties: { id: s.id, kind: s.kind === 'toilet' ? 'toilet' : s.hasBench ? 'bench' : 'table', promising: state.promising.has(s.id),
-        lovely: myInfo(s).rating === 5, sun: soon && s.kind !== 'toilet' && P.sunsetToday(s, now) },
+        lovely: myInfo(s).rating === 5, sun: soon && sunNow(s, now) },
     }));
     map.getSource('spots').setData(fc(features));
     map.setFilter('spots-selected', ['==', ['get', 'id'], state.selected || '']);
@@ -445,13 +466,20 @@
   function flyTo(c, zoom, instant) {
     if (!map) return;
     const desktop = window.matchMedia && window.matchMedia('(min-width: 900px)').matches;
-    const sheet = $('#sheet');
-    const h = desktop ? 0 : Math.min(sheet ? sheet.getBoundingClientRect().height : 330, window.innerHeight * 0.8);
+    state.pad = desktop ? { left: 430, top: 0, right: 0, bottom: 0 } : { top: 70, bottom: sheetTarget(), left: 0, right: 0 };
     state.programmatic = true;
-    map.easeTo({ center: [c.lon, c.lat], zoom: zoom || map.getZoom(), duration: instant ? 0 : 700,
-      padding: desktop ? { left: 430, top: 0, right: 0, bottom: 0 } : { top: 70, bottom: h, left: 0, right: 0 } });
+    map.easeTo({ center: [c.lon, c.lat], zoom: zoom || map.getZoom(), duration: instant ? 0 : 700, padding: state.pad });
+  }
+  // The panel's height once it has settled in the current mode (it animates, so measuring would be too early).
+  function sheetTarget() {
+    const H = window.innerHeight, m = state.sheet;
+    if (m === 'peek') return 332;
+    if (m === 'list') return H - 100;
+    if (m === 'add') return Math.min(H * 0.56, 460);
+    return Math.min(H * 0.8, 660);
   }
   function onMoveEnd() {
+    if (state.sheet === 'add') updateAddStatus();
     if (state.programmatic) { state.programmatic = false; return; }
     if (!state.center || !map) return;
     const c = map.getCenter();
@@ -479,7 +507,7 @@
     drawMe();
     autoBike(c.speed);
     if (first) {
-      if (state.invite) { renderSoft(); return; }
+      if (state.invite || state.keepView) { renderSoft(); return; }
       state.centerIsUser = true;
       flyTo(state.user, 15.5);
       load(state.user);
@@ -500,23 +528,43 @@
   }
   // Switch to cycling once when the phone reports cycling speed twice in a row.
   function autoBike(speed) {
-    if (speed != null && speed >= 4.5) state.fastFixes++; else if (speed != null && speed < 2) state.fastFixes = 0;
+    // Cycling speed is 16 to 40 km/h; faster is a tram or a car, slower is walking.
+    if (speed != null && speed >= 4.5 && speed <= 11) state.fastFixes++; else if (speed != null && (speed < 2 || speed > 11)) state.fastFixes = 0;
     if (state.fastFixes >= 2 && state.mode === 'walk' && !state.autoBike) {
       state.autoBike = true;
       setMode('bike');
       toast('You seem to be cycling, so times are by bike now.');
     }
   }
-  // Within reach of a spot: ask how it is (once per spot per session, and not again within 12 hours).
+  /* Staying at a spot: after DWELL (10 minutes) within reach of a spot, ask how it is. The clock starts
+     where you stop, keeps running if you close and reopen the app, and starts again if you move more than
+     50 m away. Not for toilets, not twice for one spot in a visit, not again within 12 hours of rating it.
+     The "Check in and rate" button works at once, whatever the clock says. */
+  let dwell = getLS(KEYS.dwell, null);
+  const reach = u => GAME.checkinRadius + Math.min(u.acc, GAME.accuracySlack);
+  function nearbySpots(u, extra = 0) {
+    const out = [];
+    for (const s of state.spots) {
+      if (s.kind === 'toilet') continue;
+      const d = nearestSeat(s, u);
+      if (d <= reach(u) + extra) out.push({ s, d });
+    }
+    return out.sort((a, b) => a.d - b.d);
+  }
   function checkArrival() {
     const u = state.user;
-    if (!u || u.acc > GAME.maxAccuracy || OVERLAYS.includes(state.sheet)) return;
-    let best = null, bd = Infinity;
-    for (const s of state.spots) { const d = nearestSeat(s, u); if (d < bd) { bd = d; best = s; } }
-    if (!best || state.dismissed.has(best.id) || bd > GAME.checkinRadius + Math.min(u.acc, GAME.accuracySlack)) return;
-    const mine = myInfo(best);
-    if (mine.lastVisit && Date.now() - mine.lastVisit < 12 * 3600000) return;
-    openArrive(best.id);
+    if (!u || u.acc > GAME.maxAccuracy) return;
+    const near = nearbySpots(u), now = Date.now();
+    if (!near.length) { if (dwell) { dwell = null; setLS(KEYS.dwell, null); } return; }
+    if (!dwell || C.metres(dwell.lat, dwell.lon, u.lat, u.lon) > 50 || now - dwell.last > 2 * 3600000) dwell = { lat: u.lat, lon: u.lon, since: now };
+    dwell.last = now;
+    setLS(KEYS.dwell, dwell);
+    if (now - dwell.since < DWELL || OVERLAYS.includes(state.sheet)) return;
+    const best = near.find(x => !state.dismissed.has(x.s.id));
+    if (!best) return;
+    const mine = myInfo(best.s);
+    if (mine.lastVisit && now - mine.lastVisit < 12 * 3600000) return;
+    openArrive(best.s.id);
   }
 
   /* ---------- the panel ---------- */
@@ -537,6 +585,8 @@
     state.sheet = OVERLAYS.includes(state.base) ? 'peek' : state.base || 'peek';
     state.selected = null;
     state.arrive = null;
+    state.add = null;
+    showCrosshair(false);
     drawSpots();
     render();
   }
@@ -570,7 +620,7 @@
       `<button type="button" class="chip" data-act="more-filters" aria-expanded="${state.moreFilters}">${state.moreFilters ? 'Fewer' : 'More'}</button>`;
   }
   function emptyText() {
-    if (state.uncovered && !state.spots.length) return 'Sitwell covers Switzerland and Croatia for now. Search a place there, or move the map.';
+    if (state.liveLoading) return 'Loading spots from OpenStreetMap…';
     switch (state.filter) {
       case 'sunset': return 'No spots nearby face today’s sunset over open water.';
       case 'toilet': return 'No public toilets mapped nearby.';
@@ -607,18 +657,28 @@
         if (state.filter !== 'toilet') body += `<button type="button" class="linkish" data-act="sort">${state.sort === 'near' ? 'Show the best first' : 'Show the nearest first'}</button>`;
       }
     }
+    if (state.liveLoading && state.ranked.length) body += '<p class="note">Loading more spots from OpenStreetMap…</p>';
+    if (state.liveError) body += `<p class="note">${esc(state.liveError)} <button type="button" class="linkish" data-act="retry" style="padding:0;min-height:0">Try again</button></p>`;
+    if (state.sheet === 'list' && canAddHere()) body += '<button type="button" class="linkish" data-act="add-start">No bench mapped where you are? Add it</button>';
     return `<div class="head"><h1>${title}</h1>
         <div class="seg"><button type="button" data-act="mode" data-v="walk" aria-pressed="${state.mode === 'walk'}">Walking</button><button type="button" data-act="mode" data-v="bike" aria-pressed="${state.mode === 'bike'}">Cycling</button></div></div>
-      ${context}<div class="chips">${chips()}</div>${body}`;
+      ${context}${wishRow()}<div class="chips">${chips()}</div>${body}`;
   }
   function spotHTML(s) {
     const t = s.text, mine = myInfo(s), now = new Date(), here = atSpot(s);
     let status = '';
-    if (mine.rating != null) status = `<p class="status mine">${icon('check', 16, '#2F5E43', 2.2)}You rated it ${esc(wordFor(mine.rating, s.kind))}.</p>`;
-    else if (state.promising.has(s.id)) status = `<p class="status">${RING}Looks promising. Nobody has rated it yet.</p>`;
+    if (s.pin) status = `<p class="status mine">${icon('check', 16, '#2F5E43', 2.2)}You added it${s._v ? '' : '. Its surroundings are being looked up'}.</p>`;
+    else if (mine.rating != null) status = `<p class="status mine">${icon('check', 16, '#2F5E43', 2.2)}You rated it ${esc(wordFor(mine.rating, s.kind))}.</p>`;
+    else if (state.promising.has(s.id)) status = `<p class="status">${RING}Looks promising. You haven’t rated it yet.</p>`;
     let tonight = '';
-    if (s.kind !== 'toilet' && state.sunset && state.sunset > now && P.sunsetToday(s, now)) {
-      tonight = `<div class="tonight">${icon('sun', 22, '#B35A12', 1.9)}<p>Tonight the sun sets over ${esc(P.waterWord(s.m))} at ${hhmm(state.sunset)}.${state.outlook ? ' ' + esc(state.outlook.label) + '.' : ''}</p></div>`;
+    const g = s.kind !== 'toilet' && s.rays ? P.sunGone(s, now) : null;
+    if (g && g.at > now && P.sunsetToday(s, now)) {
+      const water = esc(P.waterWord(s.m));
+      const line = !g.measured
+        ? `Official sunset tonight is ${hhmm(g.at)}, over ${water}. Hills can hide the sun a little earlier, so come a bit before.`
+        : g.early >= 3 ? `Tonight the sun leaves this spot at ${hhmm(g.at)}, behind the hills, ${g.early} minutes before the official sunset.`
+          : `Tonight the sun sets over ${water} at ${hhmm(g.at)}.`;
+      tonight = `<div class="tonight">${icon('sun', 22, '#B35A12', 1.9)}<p>${line}${state.outlook ? ' ' + esc(state.outlook.label) + '.' : ''}</p></div>`;
     }
     const warn = t.warnings.map(w => `<div class="row warn">${icon('warn', 20, '#8A4B12')}<span class="k">${esc(w.label)}</span><span class="d">${esc(C.fmtDist(w.d))}</span></div>`).join('');
     const near = t.facts.slice(0, 5).map(f => `<div class="row">${factIcon(f.label)}<span class="k">${esc(f.label)}</span><span class="d">${esc(C.fmtDist(f.d))}</span></div>`).join('');
@@ -638,7 +698,8 @@
         <button type="button" class="btn secondary" data-act="meet" data-id="${esc(s.id)}">Meet me here</button>
         <button type="button" class="btn icon" data-act="save" data-id="${esc(s.id)}" aria-pressed="${sv}" aria-label="${sv ? 'Saved for later' : 'Save for later'}">${icon('bookmark', 20, 'currentColor', 1.8, sv ? 'currentColor' : 'none')}</button></div>
       ${hint ? `<p class="hint">${esc(hint)}</p>` : ''}
-      <p class="hint"><a href="https://www.openstreetmap.org/note/new#map=19/${s.lat.toFixed(6)}/${s.lon.toFixed(6)}" target="_blank" rel="noopener">Something wrong or gone? Tell OpenStreetMap</a></p>
+      <p class="hint"><a href="https://www.openstreetmap.org/note/new#map=19/${s.lat.toFixed(6)}/${s.lon.toFixed(6)}" target="_blank" rel="noopener">${s.pin ? 'Tell OpenStreetMap it’s here' : 'Something wrong or gone? Tell OpenStreetMap'}</a></p>
+      ${s.pin ? '<button type="button" class="linkish" data-act="remove-pin" style="align-self:center">Remove this bench</button>' : ''}
     </div>`;
   }
   function arriveHTML(s) {
@@ -655,19 +716,33 @@
       return `<div class="ask"><h2>You’re at the ${esc(name)}${mine.visited ? ' again' : ''}</h2><p class="sub">${esc(ask)}</p>
         <div class="stars">${btns}</div>
         <p class="note">One tap saves it. You can change it for 24 hours.</p>
+        ${otherSpotsHTML(s)}
         <button type="button" class="linkish" data-act="close">Not now</button></div>`;
     }
     const tags = s.kind === 'toilet' ? '' : `<h3 style="margin:18px 0 0;font-size:16px">What’s good here?</h3><div class="tags">${TAGS.map(([id, label]) =>
       `<button type="button" class="chip" data-act="tag" data-tag="${id}" aria-pressed="${mine.tags.includes(id)}">${esc(label)}</button>`).join('')}</div>`;
     return `<div class="ask"><h2>You’re at the ${esc(name)}</h2>
       <p class="saved-line" style="margin-top:14px">${icon('check', 22, '#2F5E43', 2.2)}Saved as ${esc(wordFor(a.rated, s.kind))}. Thanks for checking in.</p>
-      ${tags}
+      ${foundHTML(s)}
+      ${tags}${installHTML()}
       <div class="actions" style="margin-top:20px"><button type="button" class="btn primary" data-act="close">Done</button><button type="button" class="btn quiet" data-act="change">Change rating</button></div></div>`;
+  }
+  // GPS can be 20–30 m out, so the nearest spot isn't always yours: offer the others within reach.
+  function otherSpotsHTML(s) {
+    const others = state.user ? nearbySpots(state.user, 25).filter(x => x.s.id !== s.id).slice(0, 3) : [];
+    if (!others.length) return '';
+    const u = state.user, way = s2 => {
+      const dx = (s2.lon - u.lon) * Math.cos(u.lat * Math.PI / 180) * 111320, dy = (s2.lat - u.lat) * 110540;
+      return ['north', 'north-east', 'east', 'south-east', 'south', 'south-west', 'west', 'north-west'][Math.round(C.bearingTo(0, 0, dx, dy) / 45) % 8];
+    };
+    return '<p class="list-title">Not this spot?</p>' + others.map(x =>
+      `<button type="button" class="option" data-act="arrive-other" data-id="${esc(x.s.id)}"><span>${esc(titleOf(x.s))}</span><small>${esc(C.fmtDist(x.d) + ' ' + way(x.s))}</small></button>`).join('');
   }
   function meetHTML(s) {
     const now = new Date();
-    const sunsetOpt = state.sunset && state.sunset - now > 20 * 60000 && state.sunset - now < 14 * 3600000
-      ? `<button type="button" class="option" data-act="share" data-when="sunset">At sunset<small>${hhmm(state.sunset)}</small></button>` : '';
+    const before = beforeSunset(s, now);
+    const sunsetOpt = before && before - now > 10 * 60000 && before - now < 14 * 3600000
+      ? `<button type="button" class="option" data-act="share" data-when="sunset">Before sunset<small>${hhmm(before)}</small></button>` : '';
     return `<div class="spot"><div class="bar"><button type="button" class="back" data-act="back-spot" aria-label="Back to the spot">${icon('back', 22, 'currentColor', 2)}</button></div>
       <div><h2>Meet me here</h2><p class="comfort">${esc(titleOf(s))}. Pick a time and send the link. Your friend can open it without installing anything.</p></div>
       <div><button type="button" class="option" data-act="share" data-when="now">Now</button>
@@ -676,26 +751,174 @@
       <div class="option"><label for="meet-time">At a time</label><input id="meet-time" type="time" value="${hhmm(new Date(now.getTime() + 60 * 60000))}"></div>
       <button type="button" class="btn primary" style="width:100%;margin-top:10px" data-act="share-time">Send the link for that time</button></div></div>`;
   }
+  /* ---------- your field guide ---------- */
+  const placeName = pl => (pl ? pl.neighbourhood || pl.district || pl.town || '' : '');
+  function dateLabel(t, long) {
+    const d = new Date(t);
+    return long ? d.toLocaleDateString([], { day: 'numeric', month: 'long', year: 'numeric' }) : d.toLocaleDateString([], { day: 'numeric', month: 'short' });
+  }
+  function guideData() {
+    let dirty = false;
+    const spotOf = p => (p.added ? pinCache.get(p.key) : state.byId.get(p.key));
+    const g = G.build(events, {
+      sentenceFor: p => { const s = spotOf(p); return s && s.text ? s.text.sentence : ''; },
+      // Ratings from the prototype carry no title: name them once the spot is loaded, and keep that name.
+      titleFor: p => {
+        const s = !p.added && spotOf(p);
+        if (!s) return '';
+        const title = titleOf(s), e = events.find(x => x.type === 'checkin' && x.spot === p.key);
+        if (e && !e.title) { e.title = title; if (!e.where && s.text) e.where = s.text.sentence; dirty = true; }
+        return title;
+      },
+    });
+    if (dirty) setLS(KEYS.events, events);
+    return g;
+  }
   function mineHTML() {
-    const latest = new Map();
-    for (const e of events) {
-      if (!((e.type === 'checkin' || e.type === 'rate' || e.type === 'add') && e.rating != null)) continue;
-      const k = e.spot || e.id;
-      if (!k) continue;
-      const cur = latest.get(k);
-      if (!cur || (e.t || 0) >= (cur.t || 0)) latest.set(k, e);
+    const g = guideData(), pages = g.pages.slice().reverse(), n = pages.length, w = wish();
+    const sub = n ? `${n} ${n === 1 ? 'page' : 'pages'}${g.places ? `, from ${g.places} ${g.places === 1 ? 'place' : 'places'}` : ''}` : 'Every new spot you rate becomes a page here.';
+    const next = w ? `<div class="wish"><button type="button" class="wish-go" data-act="open" data-id="${esc(w.spot.id)}">${icon('spark', 20, '#A2801F')}<span>Your next page could be the ${esc(lowerFirst(titleOf(w.spot)))}, ${esc(timeLabel(w))} away.</span></button></div>` : '';
+    const shelf = `<div class="shelf">${g.shelf.map(k => `<div class="k${k.count ? '' : ' missing'}">${G.svg(k.id, 30, !k.count)}<span>${esc(k.count ? k.name + (k.count > 1 ? ' ×' + k.count : '') : k.from)}</span></div>`).join('')}</div>
+      <p class="hint" style="text-align:left;margin-top:8px">${g.found} of ${g.shelf.length} kinds of souvenir found</p>`;
+    const rows = pages.map(p => `<button type="button" class="page-row" data-act="page" data-k="${esc(p.key)}"><span class="pg">${p.souvenir ? G.svg(p.souvenir.kind, 26) : ''}</span>
+      <span class="txt"><span class="t">${esc(p.title)}</span><span class="r">${esc([p.rating != null ? wordFor(p.rating, p.kind) : '', placeName(p.place), dateLabel(p.first)].filter(Boolean).join(', '))}</span></span></button>`).join('');
+    const savedList = saved.length ? '<p class="list-title">Saved for later</p>' + saved.slice().reverse().map(x =>
+      `<button type="button" class="option" data-act="goto" data-id="${esc(x.id)}" data-lat="${x.lat}" data-lon="${x.lon}"><span>${esc(x.title)}</span></button>`).join('') : '';
+    const pass = g.passport.length ? '<p class="list-title">Passport</p>' + g.passport.map(t =>
+      `<div class="passport-row"><span>${esc(t.town)}</span><span class="d">${t.total ? `${t.parts} of ${t.total} ${t.unit}` : `${t.pages} ${t.pages === 1 ? 'page' : 'pages'}`}</span></div>`).join('') : '';
+    return `<div class="spot guide"><div class="bar"><button type="button" class="back" data-act="close" aria-label="Back to the map">${icon('back', 22, 'currentColor', 2)}</button></div>
+      <div><h2>Your field guide</h2><p class="comfort">${esc(sub)}</p></div>
+      ${next}${shelf}
+      ${n ? '<p class="list-title">Pages</p>' + rows : ''}
+      ${savedList}${pass}
+      <button type="button" class="btn secondary" data-act="add-start" style="margin-top:18px">Add a missing bench</button>${installHTML(true)}
+      <p class="list-title">Your history</p>
+      <p class="comfort" style="margin-top:0">It lives on this phone, in this browser. To use it elsewhere, such as the app on your home screen, copy it here and paste it there.</p>
+      <div class="actions"><button type="button" class="btn quiet" data-act="copy-history">Copy my history</button><button type="button" class="btn quiet" data-act="paste-history">Paste history</button></div>
+      <p class="hint" style="margin-top:20px;text-align:left">Map data © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors.
+      Map style by OpenFreeMap. Weather from Open-Meteo. Hills from the Terrain Tiles by Mapzen, including EU-DEM.</p>
+      </div>`;
+  }
+  function pageHTML(key) {
+    const p = guideData().pages.find(x => x.key === key);
+    if (!p) return mineHTML();
+    const where = p.place ? [placeName(p.place), p.place.town !== placeName(p.place) ? p.place.town : ''].filter(Boolean).join(', ') : '';
+    const tags = p.tags.length ? `<div class="tags">${p.tags.map(id => { const t = TAGS.find(x => x[0] === id); return t ? `<span class="chip static">${esc(t[1])}</span>` : ''; }).join('')}</div>` : '';
+    const sv = p.souvenir ? `<div class="pressed">${G.svg(p.souvenir.kind, 56)}<p>${esc(p.souvenir.caption)}</p></div>` : '';
+    const more = p.visits > 1 ? `, and ${p.visits - 1} more ${p.visits === 2 ? 'visit' : 'visits'} since` : '';
+    return `<div class="spot page"><div class="bar"><button type="button" class="back" data-act="back-guide" aria-label="Back to your field guide">${icon('back', 22, 'currentColor', 2)}</button></div>
+      <p class="date">Found on ${esc(dateLabel(p.first, true))}${more}</p>
+      <div><h2>${esc(p.title)}</h2>${where ? `<p class="comfort">${esc(where)}</p>` : ''}</div>
+      ${typeof p.rating === 'number' ? `<p class="rating">${stars(p.rating)}<span>${esc(wordFor(p.rating, p.kind))}</span></p>` : ''}
+      ${p.where ? `<p class="sentence">${esc(p.where)}</p>` : ''}
+      ${tags}${sv}
+      <div class="actions"><button type="button" class="btn primary" data-act="share-page" data-k="${esc(p.key)}">Share this page</button>
+      <button type="button" class="btn secondary" data-act="goto" data-id="${esc(p.key)}" data-lat="${p.lat}" data-lon="${p.lon}">Show on map</button></div></div>`;
+  }
+  // After rating a new spot: the souvenir it held, if any.
+  function foundHTML(s) {
+    const a = state.arrive;
+    if (!a || a.rated == null || s.kind === 'toilet') return '';
+    const p = guideData().pages.find(x => x.key === s.id);
+    if (!p || !p.souvenir || p.visits !== 1) return '';
+    return `<div class="found">${G.svg(p.souvenir.kind, 40)}<p>You found ${esc(lowerFirst(p.souvenir.caption))}. It’s in your field guide.</p></div>`;
+  }
+  // Wishes: a promising spot near you that you haven't rated, suggested after a week without a new page.
+  function wish() {
+    const at = origin();
+    if (!at) return null;
+    const speed = SPEED[state.mode], most = state.mode === 'bike' ? 20 : 15;
+    let best = null, bd = Infinity;
+    for (const s of state.spots) {
+      if (s.kind === 'toilet' || s.pin || !state.promising.has(s.id) || myInfo(s).visited) continue;
+      const d = C.metres(at.lat, at.lon, s.lat, s.lon);
+      if (d / speed <= most && d < bd) { bd = d; best = s; }
     }
-    const rated = [...latest.values()].sort((a, b) => (b.t || 0) - (a.t || 0));
-    const item = (id, lat, lon, title, sub) => `<button type="button" class="option" data-act="goto" data-id="${esc(id)}" data-lat="${lat}" data-lon="${lon}"><span>${esc(title)}${sub ? `<br><small>${esc(sub)}</small>` : ''}</span></button>`;
-    const group = (title, list) => (list.length ? `<p class="list-title">${title}</p>` + list.map(e =>
-      item(e.spot || e.id, e.lat, e.lon, e.title || (state.byId.get(e.spot) ? titleOf(state.byId.get(e.spot)) : e.where) || 'A spot you rated', wordFor(normRating(e.rating), e.kind) + (e.place && e.place.town ? `, ${e.place.neighbourhood || e.place.district || e.place.town}` : ''))).join('') : '');
-    const lovely = rated.filter(e => normRating(e.rating) === 5), nice = rated.filter(e => normRating(e.rating) === 4);
-    const other = rated.filter(e => ![4, 5].includes(normRating(e.rating)));
-    const savedList = saved.length ? '<p class="list-title">Saved</p>' + saved.slice().reverse().map(x => item(x.id, x.lat, x.lon, x.title, '')).join('') : '';
-    const empty = !saved.length && !rated.length ? '<p class="note">Spots you save or rate show up here.</p>' : '';
-    return `<div class="spot"><div class="bar"><button type="button" class="back" data-act="close" aria-label="Back to the map">${icon('back', 22, 'currentColor', 2)}</button></div>
-      <div><h2>My spots</h2></div>${empty}${savedList}${group('Lovely', lovely)}${group('Nice', nice)}${group('Other ratings', other)}
-      <p class="hint" style="margin-top:20px"><a href="prototype.html">Open the previous version</a></p></div>`;
+    return best ? { spot: best, d: bd, minutes: bd / speed } : null;
+  }
+  function wishDue() {
+    const firsts = events.filter(e => (e.type === 'checkin' && !e.revisit) || e.type === 'add');
+    if (!firsts.length || getLS(KEYS.wishNo, '') === new Date().toDateString()) return false;
+    return Date.now() - Math.max(...firsts.map(e => e.t || 0)) > 7 * 86400000;
+  }
+  function wishRow() {
+    if (state.filter || state.sort !== 'best' || !wishDue()) return '';
+    const w = wish();
+    if (!w) return '';
+    const noun = w.spot.hasTable && !w.spot.hasBench ? 'picnic table' : 'bench';
+    return `<div class="wish"><button type="button" class="wish-go" data-act="open" data-id="${esc(w.spot.id)}">${icon('spark', 20, '#A2801F')}<span>A promising ${noun} ${esc(timeLabel(w))} away that you haven’t rated yet. Your next page?</span></button>
+      <button type="button" class="wish-x" data-act="wish-no" aria-label="Not today">${icon('close', 18)}</button></div>`;
+  }
+
+  /* ---------- sharing a page: a picture of it, with a link back to the spot ---------- */
+  function roundRect(g, x, y, w, h, r) {
+    g.beginPath(); g.moveTo(x + r, y); g.arcTo(x + w, y, x + w, y + h, r); g.arcTo(x + w, y + h, x, y + h, r);
+    g.arcTo(x, y + h, x, y, r); g.arcTo(x, y, x + w, y, r); g.closePath();
+  }
+  function wrapText(g, text, x, y, maxW, lineH, maxLines) {
+    const words = String(text || '').split(/\s+/).filter(Boolean);
+    let line = '', n = 0;
+    for (const w of words) {
+      const test = line ? line + ' ' + w : w;
+      if (g.measureText(test).width > maxW && line) {
+        if (n === maxLines - 1) { g.fillText(line.replace(/[,.;:]?$/, '…'), x, y); return y + lineH; }
+        g.fillText(line, x, y); y += lineH; n++; line = w;
+      } else line = test;
+    }
+    if (line) { g.fillText(line, x, y); y += lineH; }
+    return y;
+  }
+  async function pageCard(p) {
+    const W = 1080, H = 1350, c = document.createElement('canvas');
+    c.width = W; c.height = H;
+    const g = c.getContext && c.getContext('2d');
+    if (!g || !c.toBlob) return null;
+    if (document.fonts && document.fonts.load) {
+      try { await Promise.all(['500 60px "IBM Plex Serif"', '400 42px "IBM Plex Serif"', '400 32px "IBM Plex Sans"', '600 32px "IBM Plex Sans"'].map(f => document.fonts.load(f))); } catch (e) { /* fallback fonts */ }
+    }
+    const SERIF = '"IBM Plex Serif", Georgia, serif', SANS = '"IBM Plex Sans", -apple-system, sans-serif', x = 120, maxW = W - 240;
+    g.fillStyle = '#F6F4EF'; g.fillRect(0, 0, W, H);
+    g.fillStyle = '#FFFFFF'; roundRect(g, 56, 56, W - 112, H - 112, 40); g.fill();
+    let y = 170;
+    g.fillStyle = '#5E5950'; g.font = `400 32px ${SANS}`; g.fillText('From my field guide', x, y);
+    y += 96; g.fillStyle = '#23211D'; g.font = `500 60px ${SERIF}`; y = wrapText(g, p.title, x, y, maxW, 72, 3);
+    g.fillStyle = '#5E5950'; g.font = `400 32px ${SANS}`; g.fillText([placeName(p.place), dateLabel(p.first, true)].filter(Boolean).join(', '), x, y + 4);
+    y += 92;
+    if (typeof p.rating === 'number') {
+      for (let k = 0; k < 5; k++) {
+        g.beginPath();
+        for (let i = 0; i < 10; i++) { const a = -Math.PI / 2 + i * Math.PI / 5, r = i % 2 ? 11 : 25; g.lineTo(x + 25 + k * 58 + Math.cos(a) * r, y - 14 + Math.sin(a) * r); }
+        g.closePath(); g.fillStyle = k < p.rating ? '#B8860B' : '#E2DDD3'; g.fill();
+      }
+      g.fillStyle = '#23211D'; g.font = `600 34px ${SANS}`; g.fillText(wordFor(p.rating, p.kind), x + 5 * 58 + 22, y);
+      y += 92;
+    }
+    const bottom = p.souvenir ? H - 500 : H - 220;
+    g.fillStyle = '#23211D'; g.font = `400 42px ${SERIF}`; wrapText(g, p.where, x, y, maxW, 60, Math.max(2, Math.floor((bottom - y) / 60)));
+    if (p.souvenir) {
+      const img = new Image();
+      img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(G.svg(p.souvenir.kind, 180));
+      try { await (img.decode ? img.decode() : new Promise((ok, no) => { img.onload = ok; img.onerror = no; })); g.drawImage(img, x - 10, H - 470, 180, 180); } catch (e) { /* no picture */ }
+      g.fillStyle = '#5E5950'; g.font = `400 32px ${SANS}`; wrapText(g, p.souvenir.caption, x + 200, H - 395, maxW - 200, 44, 3);
+    }
+    g.fillStyle = '#2F5E43'; g.font = `500 40px ${SERIF}`; g.fillText('Sitwell', x, H - 150);
+    g.fillStyle = '#5E5950'; g.font = `400 30px ${SANS}`; g.fillText('Find a lovely spot to linger', x, H - 104);
+    g.textAlign = 'right'; g.fillText(location.host, W - 120, H - 104); g.textAlign = 'left';
+    return new Promise(res => c.toBlob(b => res(b), 'image/png'));
+  }
+  async function sharePage(key) {
+    const p = guideData().pages.find(x => x.key === key);
+    if (!p) return;
+    const url = location.origin + location.pathname + '#spot=' + encodeURIComponent([p.key, (+p.lat).toFixed(5), (+p.lon).toFixed(5)].join('~'));
+    const text = [p.title + '.', p.where].filter(Boolean).join(' ');
+    let file = null;
+    try { const blob = await pageCard(p); if (blob && typeof File !== 'undefined') file = new File([blob], 'sitwell-field-guide.png', { type: 'image/png' }); } catch (e) { file = null; }
+    try {
+      if (file && navigator.canShare && navigator.canShare({ files: [file] })) { await navigator.share({ files: [file], title: 'Sitwell', text, url }); return; }
+      if (navigator.share) { await navigator.share({ title: 'Sitwell', text, url }); return; }
+      if (file) { const a = document.createElement('a'); a.href = URL.createObjectURL(file); a.download = file.name; document.body.appendChild(a); a.click(); a.remove(); }
+      if (navigator.clipboard) { await navigator.clipboard.writeText(url); toast(file ? 'Picture saved and link copied.' : 'Link copied.'); }
+    } catch (e) { /* cancelled */ }
   }
   function inviteHTML(inv) {
     const s = inv.spot, when = inv.when && !isNaN(inv.when) ? inv.when : null;
@@ -704,9 +927,10 @@
       const today = new Date(), tomorrow = new Date(today.getTime() + 86400000);
       const day = when.toDateString() === today.toDateString() ? 'Today' : when.toDateString() === tomorrow.toDateString() ? 'Tomorrow'
         : when.toLocaleDateString([], { weekday: 'long', day: 'numeric', month: 'long' });
-      const sun = C.sunsetAt(when, inv.lat, inv.lon);
+      const g = s && s.rays ? P.sunGone(s, when) : null, sun = g ? g.at : C.sunsetAt(when, inv.lat, inv.lon);
       const near = sun && Math.abs(sun - when) < 3 * 3600000;
-      whenLine = `${day} at ${hhmm(when)}.${near ? ` The sun sets at ${hhmm(sun)}.` : ''}`;
+      const sunLine = !near ? '' : g && g.measured && g.early >= 3 ? ` The sun leaves the spot at ${hhmm(sun)}.` : ` The sun sets around ${hhmm(sun)}.`;
+      whenLine = `${day} at ${hhmm(when)}.${sunLine}`;
     }
     const spot = s ? `<p class="place">${esc(titleOf(s))}</p><p class="sentence">${esc(s.text.sentence)}</p>${s.text.comfort ? `<p class="comfort">${esc(s.text.comfort)}</p>` : ''}`
       : '<p class="place">A spot on the map above</p>';
@@ -729,6 +953,8 @@
     else if (mode === 'arrive' && s) html = arriveHTML(s);
     else if (mode === 'meet' && s) html = meetHTML(s);
     else if (mode === 'mine') html = mineHTML();
+    else if (mode === 'add' && state.add) html = addHTML();
+    else if (mode === 'page' && state.pageKey) html = pageHTML(state.pageKey);
     else if (mode === 'invite' && state.invite) html = inviteHTML(state.invite);
     else html = listHTML();
     body.innerHTML = html;
@@ -753,6 +979,7 @@
     else if (!mine.visited) record(Object.assign({ type: 'checkin', first: true, value: 0 }, base));
     else record(Object.assign({ type: 'checkin', revisit: true, value: 0 }, base));
     state.arrive = { id: s.id, rated: n };
+    if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});   // ask the browser to keep your history
     rank();
     drawSpots();
     render();
@@ -763,10 +990,16 @@
     record({ type: 'tags', t: Date.now(), spot: s.id, lat: +s.lat.toFixed(6), lon: +s.lon.toFixed(6), tags: cur });
     render();
   }
-  function whenFor(code) {
+  // Meeting before sunset: 15 minutes before the sun leaves the spot where that's known, otherwise
+  // 45 minutes before the official sunset, so hills can't spoil it.
+  function beforeSunset(s, now) {
+    const g = P.sunGone(s, now);
+    return g ? new Date(g.at.getTime() - (g.measured ? 15 : 45) * 60000) : null;
+  }
+  function whenFor(code, s) {
     const now = new Date();
     if (code === '30') return new Date(now.getTime() + 30 * 60000);
-    if (code === 'sunset' && state.sunset) return new Date(state.sunset.getTime() - 15 * 60000);
+    if (code === 'sunset' && s) return beforeSunset(s, now) || now;
     return now;
   }
   async function shareMeet(s, when) {
@@ -825,6 +1058,224 @@
     toastTimer = setTimeout(() => t.classList.remove('on'), 2800);
   }
 
+  /* ---------- live squares, where no static files exist ---------- */
+  function fetchLiveSquares(ids, token) {
+    source.fetchLive(ids, sq => {
+      if (token !== loadToken) return false;
+      state.liveLoading = Math.max(0, state.liveLoading - 1);
+      mergeSquare(sq);
+      return true;
+    }, (id, e) => {
+      if (token !== loadToken) return false;
+      state.liveLoading = 0;
+      state.liveError = e && e.busy ? 'The OpenStreetMap servers are busy, so some spots are missing.' : 'Some spots couldn’t load.';
+      renderSoft();
+      return false;   // stop asking: be gentle with the shared servers
+    });
+  }
+  function mergeSquare(sq) {
+    state.spots = state.spots.filter(s => s.square !== sq.id || s.pin).concat(sq.spots.map(ready));
+    state.byId = new Map(state.spots.map(s => [s.id, s]));
+    rank();
+    drawSpots();
+    if (state.invite && !state.invite.spot) { state.invite.spot = findSpot(state.invite); if (state.invite.spot) state.selected = state.invite.spot.id; }
+    if (state.pendingOpen) { const s = findSpot(state.pendingOpen); if (s) { state.pendingOpen = null; openSpot(s.id, true); return; } }
+    if (state.sheet === 'invite') render(); else renderSoft();
+    checkArrival();
+  }
+
+  /* ---------- benches you added (on this phone until Sitwell has accounts) ---------- */
+  let pinMeasures = getLS(KEYS.pins, {});
+  if (!pinMeasures || typeof pinMeasures !== 'object') pinMeasures = {};
+  const pinCache = new Map(), measuring = new Set();
+  function pinsAll() {
+    const removed = new Set(events.filter(e => e.type === 'remove').map(e => e.id));
+    return events.filter(e => e.type === 'add' && e.id && e.lat != null && !removed.has(e.id));
+  }
+  function pinSpot(e) {
+    const known = pinMeasures[e.id], v = known ? 1 : 0, cached = pinCache.get(e.id);
+    if (cached && cached._v === v) return cached;
+    const kind = e.kind === 'table' ? 'table' : 'bench';
+    const s = { id: e.id, kind, lat: e.lat, lon: e.lon, tags: Object.assign({}, e.tags || {}), added: true, pin: true, _v: v,
+      members: [{ id: e.id, kind, lat: e.lat, lon: e.lon, added: true }],
+      counts: { bench: kind === 'bench' ? 1 : 0, table: kind === 'table' ? 1 : 0 }, hasBench: kind === 'bench', hasTable: kind === 'table',
+      m: C.unpackMeasures(known ? known.m : {}), rays: known ? known.rays : null, place: null,
+      placeInfo: (known && known.place) || e.place || null, square: C.squareOf(e.lat, e.lon) };
+    ready(s);
+    pinCache.set(e.id, s);
+    return s;
+  }
+  const pinsNear = (c, r) => pinsAll().filter(e => C.metres(c.lat, c.lon, e.lat, e.lon) <= r).map(pinSpot);
+  async function measurePin(e) {
+    if (measuring.has(e.id)) return;
+    measuring.add(e.id);
+    try {
+      pinMeasures[e.id] = await source.measurePoint(e.lat, e.lon);
+      setLS(KEYS.pins, pinMeasures);
+      pinCache.delete(e.id);
+      const s = pinSpot(e);
+      state.spots = state.spots.filter(x => x.id !== e.id).concat([s]);
+      state.byId = new Map(state.spots.map(x => [x.id, x]));
+      rank();
+      drawSpots();
+      if (state.selected === e.id || !OVERLAYS.includes(state.sheet)) render();
+    } catch (err) { /* looked up again next time the area loads */ }
+    measuring.delete(e.id);
+  }
+  function measureMissingPins() {
+    const missing = pinsAll().filter(e => !pinMeasures[e.id] && state.byId.has(e.id));
+    missing.reduce((chain, e) => chain.then(() => measurePin(e)), Promise.resolve());
+  }
+  function nearestSeatAny(p) {
+    let bd = Infinity;
+    for (const s of state.spots) if (s.kind !== 'toilet') for (const m of s.members) bd = Math.min(bd, C.metres(p.lat, p.lon, m.lat, m.lon));
+    return bd;
+  }
+  const addsToday = () => events.filter(e => e.type === 'add' && new Date(e.t).toDateString() === new Date().toDateString()).length;
+  const canAddHere = () => !!state.user && state.user.acc <= GAME.addMaxAccuracy && nearestSeatAny(state.user) > GAME.checkinRadius;
+  function showCrosshair(on) {
+    const x = $('#crosshair');
+    if (!x) return;
+    x.hidden = !on;
+    if (!on) return;
+    const p = state.pad || { top: 70, bottom: sheetTarget(), left: 0, right: 0 }, W = window.innerWidth, H = window.innerHeight;
+    x.style.left = (p.left + (W - p.left - p.right) / 2) + 'px';
+    x.style.top = (p.top + (H - p.top - p.bottom) / 2) + 'px';
+  }
+  function startAdd() {
+    if (addsToday() >= GAME.addsPerDay) { toast(`That’s ${GAME.addsPerDay} new benches today, the daily limit.`); return; }
+    if (!TEST) {
+      if (!state.user) { startLocation(true); toast('Turn on your location to add a bench where you are.'); return; }
+      if (state.user.acc > GAME.addMaxAccuracy) { toast(`Your location is only accurate to ${Math.round(state.user.acc)} m. Try again from a more open spot.`); return; }
+    }
+    state.add = { kind: 'bench', backrest: '', rating: null, done: null };
+    state.selected = null;
+    if (OVERLAYS.includes(state.sheet)) { state.sheet = 'add'; render(); } else setSheet('add');
+    const c = state.user || (map ? { lat: map.getCenter().lat, lon: map.getCenter().lng } : state.center);
+    if (c) flyTo(c, 19);
+    showCrosshair(true);
+    updateAddStatus();
+  }
+  // Where the cross is, and whether a bench can go there.
+  function addCheck() {
+    if (!map) return { ok: false, text: 'The map isn’t available here, so the bench can’t be placed.' };
+    const c = map.getCenter(), p = { lat: c.lat, lon: c.lng }, near = nearestSeatAny(p);
+    if (near < GAME.addMinGap) return { ok: false, p, text: `There’s already a bench ${Math.round(near)} m from the cross. Rate that one, or move the cross.` };
+    if (TEST) return { ok: true, p, text: 'Test mode: the bench goes where the cross is.' };
+    const u = state.user;
+    if (!u) return { ok: false, p, text: 'Your location is needed to add a bench.' };
+    const d = C.metres(u.lat, u.lon, p.lat, p.lon);
+    if (d > GAME.addMaxDistance) return { ok: false, p, text: `The cross is ${Math.round(d)} m from you. Bring it within ${GAME.addMaxDistance} m of where you stand.` };
+    return { ok: true, p, text: d < 3 ? 'The cross is where you stand.' : `The cross is ${Math.round(d)} m from you.` };
+  }
+  function updateAddStatus() {
+    const el = $('#add-status');
+    if (!el || !state.add || state.add.done) return;
+    const chk = addCheck();
+    el.textContent = chk.text;
+    el.className = 'status ' + (chk.ok ? 'mine' : 'warn');
+  }
+  function addHTML() {
+    const a = state.add;
+    if (a.done) {
+      const e = a.done, what = e.kind === 'table' ? 'picnic table' : 'bench';
+      return `<div class="spot"><div><h2>Added</h2><p class="comfort">Only you can see this ${what} for now. Once Sitwell has shared ratings, everyone will.</p></div>
+        <p class="comfort">Telling OpenStreetMap helps every map that uses it, Sitwell included.</p>
+        <a class="btn secondary" href="https://www.openstreetmap.org/note/new#map=19/${e.lat}/${e.lon}" target="_blank" rel="noopener">Tell OpenStreetMap</a>
+        <button type="button" class="btn primary" data-act="close">Done</button></div>`;
+    }
+    const chk = addCheck();
+    let rows = '';
+    for (let n = 5; n >= 1; n--) rows += `<button type="button" class="star-btn" data-act="add-rate" data-n="${n}" aria-pressed="${a.rating === n}"><span class="s">${stars(n)}</span><span class="w">${esc(WORDS.seat[n - 1])}</span></button>`;
+    const back = a.kind !== 'bench' ? '' : `<div><p class="list-title">Does it have a backrest?</p><div class="tags">${[['yes', 'Yes'], ['no', 'No'], ['', 'Not sure']].map(([v, l]) =>
+      `<button type="button" class="chip" data-act="add-back" data-v="${v}" aria-pressed="${a.backrest === v}">${l}</button>`).join('')}</div></div>`;
+    return `<div class="spot add"><div class="bar"><button type="button" class="back" data-act="close" aria-label="Cancel">${icon('back', 22, 'currentColor', 2)}</button></div>
+      <div><h2>Add a missing bench</h2><p class="comfort">Move the map so the cross sits on it.</p></div>
+      <p id="add-status" class="status ${chk.ok ? 'mine' : 'warn'}">${esc(chk.text)}</p>
+      <div><p class="list-title">What is it?</p><div class="seg wide"><button type="button" data-act="add-kind" data-v="bench" aria-pressed="${a.kind === 'bench'}">Bench</button><button type="button" data-act="add-kind" data-v="table" aria-pressed="${a.kind === 'table'}">Picnic table</button></div></div>
+      ${back}
+      <div><p class="list-title">How is it?</p><div class="stars">${rows}</div></div>
+      <button type="button" class="btn primary" data-act="add-save">Add it</button>
+      <p class="hint">Up to ${GAME.addsPerDay} a day. It needs to be at least ${GAME.addMinGap} m from a bench that’s already mapped.</p></div>`;
+  }
+  function nearestPlace(p) {
+    let best = null, bd = 3000;
+    for (const s of state.spots) {
+      if (!s.placeInfo || s.pin) continue;
+      const d = C.metres(p.lat, p.lon, s.lat, s.lon);
+      if (d < bd) { bd = d; best = s.placeInfo; }
+    }
+    return best;
+  }
+  function saveAdd() {
+    const a = state.add, chk = addCheck();
+    if (!chk.ok) { toast(chk.text); return; }
+    if (a.rating == null) { toast('Pick how it is first.'); return; }
+    const now = Date.now();
+    const e = record({ type: 'add', t: now, id: 'user/' + now, kind: a.kind, lat: +chk.p.lat.toFixed(6), lon: +chk.p.lon.toFixed(6),
+      tags: a.kind === 'bench' && a.backrest ? { backrest: a.backrest } : {}, rating: a.rating, value: 0, place: nearestPlace(chk.p),
+      title: a.kind === 'table' ? 'Picnic table you added' : 'Bench you added' });
+    if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
+    const s = pinSpot(e);
+    state.spots.push(s);
+    state.byId.set(s.id, s);
+    a.done = e;
+    showCrosshair(false);
+    rank();
+    drawSpots();
+    render();
+    measurePin(e);
+  }
+
+  /* ---------- on the home screen ---------- */
+  let installEvent = null;
+  window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); installEvent = e; });
+  const standalone = () => (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || navigator.standalone === true;
+  const isIOS = () => /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  function installHTML(always) {
+    if (standalone() || (!always && getLS(KEYS.install, false))) return '';
+    const why = 'It opens faster, works offline, and keeps your ratings safe.';
+    if (installEvent) {
+      return `<div class="install"><p><strong>Keep Sitwell on your home screen.</strong> ${why}</p>
+        <div class="actions"><button type="button" class="btn primary" data-act="install">Add to home screen</button>${always ? '' : '<button type="button" class="btn quiet" data-act="install-no">Not now</button>'}</div></div>`;
+    }
+    if (isIOS()) {
+      return `<div class="install"><p><strong>Keep Sitwell on your home screen.</strong> ${why} Tap the Share button, then “Add to Home Screen”. On iPhone the home-screen app starts empty, so copy your history across under My spots.</p>
+        ${always ? '' : '<button type="button" class="btn quiet" data-act="install-no">Got it</button>'}</div>`;
+    }
+    return '';
+  }
+
+  /* ---------- moving your history (to the home-screen app, another browser, or a new address) ---------- */
+  const PREFIX = 'sitwell-history:';
+  async function copyHistory() {
+    const data = JSON.stringify({ v: 1, events, saved, pins: pinMeasures });
+    const text = PREFIX + btoa(unescape(encodeURIComponent(data)));
+    try { await navigator.clipboard.writeText(text); toast('History copied. Now open Sitwell where you want it, and paste it under My spots.'); }
+    catch (e) { toast('This browser doesn’t allow copying here.'); }
+  }
+  async function pasteHistory() {
+    let text = '';
+    try { text = await navigator.clipboard.readText(); } catch (e) { toast('This browser doesn’t allow pasting here.'); return; }
+    const m = /^sitwell-history:(\S+)$/.exec((text || '').trim());
+    if (!m) { toast('There’s no Sitwell history on the clipboard. Copy it first.'); return; }
+    let d;
+    try { d = JSON.parse(decodeURIComponent(escape(atob(m[1])))); } catch (e) { toast('That history couldn’t be read.'); return; }
+    const key = e => [e.type, e.t, e.spot || e.id || '', e.rating || ''].join('|');
+    const have = new Set(events.map(key));
+    let added = 0;
+    for (const e of d.events || []) if (e && e.type && !have.has(key(e))) { events.push(e); have.add(key(e)); added++; }
+    events.sort((a, b) => (a.t || 0) - (b.t || 0));
+    setLS(KEYS.events, events);
+    for (const x of d.saved || []) if (x && !saved.some(y => y.id === x.id)) saved.push(x);
+    setLS(KEYS.saved, saved);
+    if (d.pins && typeof d.pins === 'object') { Object.assign(pinMeasures, d.pins); setLS(KEYS.pins, pinMeasures); }
+    pinCache.clear();
+    toast(added ? `Added ${added} ${added === 1 ? 'entry' : 'entries'} from your history.` : 'That history was already here.');
+    if (state.center) load(state.centerIsUser && state.user ? state.user : state.center);
+    render();
+  }
+
   /* ---------- place search ---------- */
   function renderResults() {
     const q = $('#q'), out = $('#results'), v = q.value.trim();
@@ -868,10 +1319,11 @@
         case 'back-spot': state.sheet = 'spot'; render(); break;
         case 'save': if (s) { toggleSave(s); render(); } break;
         case 'arrive': if (s) openArrive(s.id); break;
+        case 'arrive-other': if (s) { state.selected = s.id; state.arrive = { id: s.id, rated: null }; render(); drawSpots(); } break;
         case 'rate': if (s) saveRating(s, el.dataset.n === 'closed' ? 'closed' : Number(el.dataset.n)); break;
         case 'change': if (state.arrive) { state.arrive.rated = null; state.arrive.changed = true; render(); } break;
         case 'tag': if (s) toggleTag(s, el.dataset.tag); break;
-        case 'share': if (s) shareMeet(s, whenFor(el.dataset.when)); break;
+        case 'share': if (s) shareMeet(s, whenFor(el.dataset.when, s)); break;
         case 'share-time': {
           const v = ($('#meet-time') || {}).value;
           if (s && /^\d{2}:\d{2}$/.test(v || '')) {
@@ -894,6 +1346,39 @@
         }
         case 'ics': downloadIcs(state.invite); break;
         case 'explore': leaveInvite(); break;
+        case 'retry': state.liveError = ''; if (state.center) load(state.centerIsUser && state.user ? state.user : state.center); break;
+        case 'add-start': startAdd(); break;
+        case 'add-kind': if (state.add) { state.add.kind = el.dataset.v; render(); } break;
+        case 'add-back': if (state.add) { state.add.backrest = el.dataset.v; render(); } break;
+        case 'add-rate': if (state.add) { state.add.rating = Number(el.dataset.n); render(); } break;
+        case 'add-save': if (state.add) saveAdd(); break;
+        case 'remove-pin':
+          if (s && s.pin) {
+            record({ type: 'remove', t: Date.now(), id: s.id });
+            state.spots = state.spots.filter(x => x.id !== s.id);
+            state.byId.delete(s.id);
+            pinCache.delete(s.id);
+            rank();
+            drawSpots();
+            closeOverlay();
+            toast('Removed');
+          }
+          break;
+        case 'install':
+          if (installEvent) {
+            const ev = installEvent;
+            installEvent = null;
+            ev.prompt();
+            if (ev.userChoice) ev.userChoice.finally(() => { setLS(KEYS.install, true); render(); });
+          }
+          break;
+        case 'install-no': setLS(KEYS.install, true); render(); break;
+        case 'copy-history': copyHistory(); break;
+        case 'page': state.pageKey = el.dataset.k; state.sheet = 'page'; render(); $('#sheet-body').scrollTop = 0; break;
+        case 'back-guide': state.sheet = 'mine'; render(); break;
+        case 'share-page': sharePage(el.dataset.k); break;
+        case 'wish-no': setLS(KEYS.wishNo, new Date().toDateString()); render(); break;
+        case 'paste-history': pasteHistory(); break;
         default: break;
       }
     });
@@ -918,7 +1403,7 @@
       else { state.sheet = state.sheet === 'peek' ? 'list' : 'peek'; render(); }
     });
 
-    $('#locate').addEventListener('click', () => { if (state.user) recenter(); else startLocation(true); });
+    $('#locate').addEventListener('click', () => { state.keepView = false; if (state.user) recenter(); else startLocation(true); });
     $('#mine').addEventListener('click', () => { state.selected = null; setSheet('mine'); });
     $('#here').addEventListener('click', () => {
       if (!map) return;
@@ -961,11 +1446,23 @@
       flyTo(state.invite, 16, true);
       load(state.invite);
       maybeLocate();
+    } else if (/#spot=/.test(location.hash)) {
+      const [id, lat, lon] = decodeURIComponent(/#spot=([^&]+)/.exec(location.hash)[1]).split('~');
+      const p = { id, lat: Number(lat), lon: Number(lon) };
+      try { history.replaceState(null, '', location.pathname + location.search); } catch (e) { /* fine */ }
+      if (isFinite(p.lat) && isFinite(p.lon)) { state.pendingOpen = p; state.keepView = true; flyTo(p, 16, true); load(p); } else load(ZURICH);
+      maybeLocate();
     } else {
       load(ZURICH);
       maybeLocate();
     }
     render();
+    // Works offline and from the home screen once the service worker is in place.
+    if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
+    window.addEventListener('online', () => { if (state.error || state.liveError) load(state.centerIsUser && state.user ? state.user : state.center || ZURICH); else renderSoft(); });
+    window.addEventListener('offline', renderSoft);
+    // Standing still sends few location updates, so check the arrival clock regularly too.
+    setInterval(checkArrival, 20000);
     // The moment changes as the evening comes: re-rank every minute.
     setInterval(() => { computeSunset(); rank(); drawSpots(); renderSoft(); }, 60000);
   }

@@ -14,6 +14,8 @@ const C = require('../core/core.js');
 const { Region } = require('./lib/region.js');
 const { Places, ownedSquares } = require('./lib/places.js');
 const { publish } = require('./lib/publish.js');
+const { Elevation } = require('./lib/dem.js');
+const Horizon = require('./lib/horizon.js');
 
 const args = {};
 for (let k = 2; k < process.argv.length; k += 2) args[process.argv[k].replace(/^--/, '')] = process.argv[k + 1];
@@ -34,6 +36,35 @@ const MARGIN = {
 
 const t0 = Date.now();
 const log = (...a) => console.log(`[${((Date.now() - t0) / 1000).toFixed(1).padStart(6)}s]`, ...a);
+
+// Horizons from the previous build, reused while a spot hasn't moved: terrain doesn't change.
+function previousHorizons(prev) {
+  const out = new Map(), dir = prev && path.join(prev, 'v1', 's');
+  if (!dir || !fs.existsSync(dir)) return out;
+  for (const f of fs.readdirSync(dir)) {
+    try { for (const r of JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8')).spots) if (r.horizon) out.set(r.id, { lat: r.lat, lon: r.lon, h: r.horizon }); } catch (e) { /* skip */ }
+  }
+  return out;
+}
+const PREV_HORIZONS = previousHorizons(args.prev);
+
+// Sunset spots (open water toward the sunset) get a horizon profile, so the app knows when hills hide the sun.
+async function addHorizons(code, recs, stats) {
+  const want = recs.filter(r => r.kind !== 'toilet' && r.rays && r.rays.some(v => v >= 150)), todo = [];
+  for (const r of want) {
+    const p = PREV_HORIZONS.get(r.id);
+    if (p && C.metres(p.lat, p.lon, r.lat, r.lon) < 2) r.horizon = p.h; else todo.push(r);
+  }
+  stats.horizons = want.length - todo.length;
+  if (!todo.length) { log(`${code}: ${stats.horizons} sunset horizons reused, none new`); return; }
+  const dem = new Elevation({ cacheDir: path.join(WORK, 'dem') }), tiles = Horizon.tilesFor(todo);
+  log(`${code}: ${todo.length} sunset spots need a horizon; loading ${tiles.length} elevation tiles`);
+  await dem.load(tiles);
+  let made = 0;
+  for (const r of todo) { const h = Horizon.profile(dem, r.lat, r.lon); if (h) { r.horizon = h; made++; } }
+  stats.horizons += made;
+  log(`${code}: ${made} new horizons (${dem.fetched} tiles downloaded, ${dem.failed} unavailable), ${stats.horizons - made} reused`);
+}
 
 async function buildRegion(cfg, squares, allOwned, searchPlaces) {
   const file = path.join(WORK, cfg.code + '.geojsonseq');
@@ -57,7 +88,8 @@ async function buildRegion(cfg, squares, allOwned, searchPlaces) {
   const inOwned = [...bySquare.values()].reduce((n, l) => n + l.length, 0);
   log(`${cfg.code}: ${inOwned} spots and toilets in ${bySquare.size} of its squares (${groups.length + toilets.length} in the whole extract)`);
 
-  const stats = { spots: 0, toilets: 0, rays: 0, sunsetWater: 0, places: 0, squares: bySquare.size };
+  const stats = { spots: 0, toilets: 0, rays: 0, sunsetWater: 0, places: 0, squares: bySquare.size, horizons: 0 };
+  const regionRecs = [];
   let done = 0;
   for (const sq of [...bySquare.keys()].sort()) {
     if (squares.has(sq)) { console.warn(`  ${sq} already built by another region, skipped`); continue; }
@@ -85,9 +117,11 @@ async function buildRegion(cfg, squares, allOwned, searchPlaces) {
       spots.push(C.packSpot(s));
     }
     spots.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+    for (const r of spots) regionRecs.push(r);
     squares.set(sq, { spots, places: placeList });
     if (++done % 500 === 0) log(`${cfg.code}: ${done} of ${bySquare.size} squares`);
   }
+  await addHorizons(cfg.code, regionRecs, stats);
   for (const sq of owned) allOwned.add(sq);
   const found = places.searchEntries(owned);
   for (const p of found) searchPlaces.push(p);

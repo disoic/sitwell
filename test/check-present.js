@@ -35,6 +35,14 @@ console.log('season wording ok');
   console.log('score: promising spot + two 5-star ratings = 4.5 (Lovely); plain spot + one 5-star = 2.8; estimate alone never Lovely');
 }
 
+// 3b. Wording: a named path in the woods is "by a footpath", elsewhere "on a promenade".
+{
+  const woods = C.unpackSpot({ id: 'node/1', kind: 'bench', lat: 47.37, lon: 8.54, m: { promenade: 5, inForest: 1 } });
+  const town = C.unpackSpot({ id: 'node/2', kind: 'bench', lat: 47.37, lon: 8.54, m: { promenade: 5 } });
+  assert(/by a footpath/.test(P.describe(woods).sentence) && /on a promenade/.test(P.describe(town).sentence));
+  console.log('wording: "' + P.describe(woods).sentence + '" / "' + P.describe(town).sentence + '"');
+}
+
 // 4. Real spots from the built files, when there are any (the workflow runs this after each build).
 const dir = path.join(process.argv[2] || 'site/data', 'v1', 's');
 if (!fs.existsSync(dir)) { console.log('no spot files to sample; presentation checks passed'); process.exit(0); }

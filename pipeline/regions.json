@@ -13,6 +13,13 @@
       "iso": "HR",
       "url": "https://download.geofabrik.de/europe/croatia-latest.osm.pbf",
       "poly": "https://download.geofabrik.de/europe/croatia.poly"
+    },
+    {
+      "code": "SI",
+      "name": "Slovenia",
+      "iso": "SI",
+      "url": "https://download.geofabrik.de/europe/slovenia-latest.osm.pbf",
+      "poly": "https://download.geofabrik.de/europe/slovenia.poly"
     }
   ]
 }

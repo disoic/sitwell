@@ -61,6 +61,38 @@
     const k = Math.floor((bearing - B[0]) / step), f = (bearing - B[k]) / step;
     return rays[k] * (1 - f) + rays[Math.min(k + 1, last)] * f;
   }
+  // Refraction near the horizon (Saemundsson), in degrees, for a true altitude in degrees.
+  const refraction = h => (h < -1.5 ? 0.62 : 1.02 / Math.tan((h + 10.3 / (h + 5.11)) * rad) / 60);
+  // How high the hills rise toward a compass bearing, from the spot's horizon profile.
+  function horizonAt(s, bearing) {
+    const H = s.horizon, from = C.HORIZON.from, step = C.HORIZON.step, last = H.length - 1;
+    if (bearing <= from) return H[0];
+    if (bearing >= from + last * step) return H[last];
+    const k = Math.floor((bearing - from) / step), f = (bearing - from - k * step) / step;
+    return H[k] * (1 - f) + H[Math.min(k + 1, last)] * f;
+  }
+  /* When the sun leaves a spot that day: the last minute its upper edge is above the hills of the
+     spot's horizon profile. Spots without a profile get the official sunset ("measured: false").
+     Returns { at, early (minutes before the official sunset), bearing, measured }. */
+  function sunGone(s, date = new Date(), stepMin = 1) {
+    const t0 = C.sunsetAt(date, s.lat, s.lon);
+    if (!t0) return null;
+    const key = t0.toDateString() + stepMin;
+    if (s._gone && s._gone.k === key) return s._gone.v;
+    let v;
+    if (!s.horizon) v = { at: t0, early: 0, bearing: sunPosition(t0, s.lat, s.lon).bearing, measured: false };
+    else {
+      const visible = t => { const p = sunPosition(new Date(t), s.lat, s.lon); return p.altitude + 0.27 + refraction(p.altitude) > horizonAt(s, p.bearing); };
+      const step = stepMin * 60000, start = t0.getTime();
+      let t = start;
+      if (visible(t)) { while (t < start + 30 * 60000 && visible(t + step)) t += step; }   // land lower than the sea's horizon: a little later
+      else { while (t > start - 4 * 3600000 && !visible(t)) t -= step; }                  // hills: back to the last minute it showed
+      const at = new Date(t);
+      v = { at, early: Math.round((start - t) / 60000), bearing: sunPosition(at, s.lat, s.lon).bearing, measured: true };
+    }
+    s._gone = { k: key, v };
+    return v;
+  }
   const faces = (tags, bearing) => tags.direction == null || angleDiff(Number(tags.direction), bearing) <= R.facingSlack;
   const sunsetOverWater = (s, bearing) => bearing != null && waterToward(s.rays, bearing) >= R.sunsetWater && faces(s.tags || {}, bearing);
 
@@ -70,11 +102,14 @@
     const out = [];
     if (s.rays) {
       const year = new Date().getUTCFullYear();
-      for (let m = 0; m < 12; m++) if (sunsetOverWater(s, sunsetBearing(new Date(Date.UTC(year, m, 15, 12)), s.lat, s.lon))) out.push(m + 1);
+      for (let m = 0; m < 12; m++) {
+        const g = sunGone(s, new Date(Date.UTC(year, m, 15, 12)), 3);
+        if (g && sunsetOverWater(s, g.bearing)) out.push(m + 1);
+      }
     }
     return (s._sunsetMonths = out);
   }
-  const sunsetToday = (s, date = new Date()) => !!s.rays && sunsetOverWater(s, sunsetBearing(date, s.lat, s.lon));
+  const sunsetToday = (s, date = new Date()) => { if (!s.rays) return false; const g = sunGone(s, date); return !!g && sunsetOverWater(s, g.bearing); };
 
   // "from April to September", "in spring and autumn", or '' for all year.
   function seasonPhrase(months) {
@@ -141,7 +176,8 @@
     const head = [seaside ? 'seaside' : lakeside ? 'lakeside' : riverside ? 'riverside' : '', noun].filter(Boolean).join(' ');
     const tail = [];
     if (where) tail.push(where);
-    if (m.promenade <= R.promenade) tail.push('on a promenade');
+    // A named path in the woods is a trail, not a promenade.
+    if (m.promenade <= R.promenade) tail.push(m.inForest || m.forestEdge <= R.forestEdge ? 'by a footpath' : 'on a promenade');
     if (!seaside && !lakeside && !riverside) {
       if (m.stream <= R.stream) tail.push('by a stream');
       else if (m.pond <= R.pond) tail.push('by a pond');
@@ -292,8 +328,9 @@
     if (w && w.temp >= 26) { v += shaded ? 0.5 : -0.3; if (shaded) reasons.push('shade'); }
     if (w && w.temp <= 10 && w.precip < 0.2 && Math.max(w.low, w.mid) < 50 && !shaded) { v += 0.3; reasons.push('sun'); }
     if (ctx.sunset && ctx.sunset.at) {
-      const minutes = (ctx.sunset.at - ctx.now) / 60000;
-      if (minutes <= 90 && minutes >= -10 && sunsetToday(s, ctx.now)) {
+      // Each spot's own sunset: earlier where hills hide the sun.
+      const g = s.rays ? sunGone(s, ctx.now) : null, minutes = g ? (g.at - ctx.now) / 60000 : Infinity;
+      if (minutes <= 90 && minutes >= -5 && sunsetOverWater(s, g.bearing)) {
         const q = ctx.sunset.outlook ? ctx.sunset.outlook.quality : 1;
         v += 0.3 + 0.7 * q;
         reasons.push('sunset');
@@ -321,7 +358,7 @@
   }
 
   return {
-    R, SCORE, sunPosition, sunsetBearing, waterToward, sunsetMonths, sunsetToday, seasonPhrase, waterWord, noise,
+    R, SCORE, sunPosition, sunsetBearing, sunGone, waterToward, sunsetMonths, sunsetToday, seasonPhrase, waterWord, noise,
     describe, estimate, score, band, promising, flags, sunsetOutlook, forecastUrl, forecastAt, nowValue, rankNow, prepare,
   };
 }));

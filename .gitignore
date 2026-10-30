@@ -1,0 +1,6 @@
+work/
+site/
+previous/
+node_modules/
+*.osm.pbf
+*.geojsonseq

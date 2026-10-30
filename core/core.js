@@ -58,6 +58,8 @@
   // Sunset rays: open water measured along these compass bearings from each spot near water.
   // 230-310 covers the sunset direction all year from Croatia to the north of Switzerland.
   const RAYS = { from: 230, to: 310, step: 5, reach: 2000, startWithin: 150, gap: 15, near: 150 };
+  // Horizon profiles toward the sunset (from the pipeline): one value every 2 degrees from 230 to 310.
+  const HORIZON = { from: 230, to: 310, step: 2 };
   const RAY_BEARINGS = [];
   for (let b = RAYS.from; b <= RAYS.to; b += RAYS.step) RAY_BEARINGS.push(b);
 
@@ -805,6 +807,7 @@
     if (Object.keys(s.tags).length) rec.tags = s.tags;
     rec.m = packMeasures(s.m);
     if (s.rays) rec.rays = s.rays;
+    if (s.horizon) rec.horizon = s.horizon;
     if (s.place != null) rec.place = s.place;
     return rec;
   }
@@ -817,6 +820,7 @@
       id: rec.id, kind: rec.kind, lat: rec.lat, lon: rec.lon, tags: rec.tags || {}, added: false, members,
       counts, hasBench: counts.bench > 0, hasTable: counts.table > 0,
       m: unpackMeasures(rec.m || {}), rays: rec.rays || null, place: rec.place != null ? rec.place : null,
+      horizon: rec.horizon ? rec.horizon.map(v => v / 10 - 5) : null,
     };
   }
 
@@ -980,7 +984,7 @@
   }
 
   return {
-    FORMAT, RULES, LIMITS, GROUP_RADIUS, SEARCH_RADIUS, GRID, RAYS, RAY_BEARINGS, MATERIAL, FOOD_LABEL, SNACK_LABEL, PROMISING_FROM,
+    FORMAT, RULES, LIMITS, GROUP_RADIUS, SEARCH_RADIUS, GRID, RAYS, RAY_BEARINGS, HORIZON, MATERIAL, FOOD_LABEL, SNACK_LABEL, PROMISING_FROM,
     squareOf, squareBox, squareCenter, blockOf, slotInBlock, squaresForCircle,
     makeProj, metres, segDist, bearingTo, SegIndex, Shape, makeGrid, gridAdd, gridScan, nearestPoint,
     isClosed, seatKind, stopLabel, waterKind, pointRoles, lineRole, areaRole, normDirection,

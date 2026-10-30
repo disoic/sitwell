@@ -6,9 +6,9 @@ const path = require('path');
 const r = require(path.resolve(process.argv[2] || 'site/data', 'v1', 'report.json'));
 const n = x => Number(x).toLocaleString('en');
 const out = [`### Spot files built ${r.built}`, ''];
-out.push('| Region | Spots | Toilets | Near water | Open water toward sunset | With passport place |', '|---|---:|---:|---:|---:|---:|');
+out.push('| Region | Spots | Toilets | Near water | Open water toward sunset | With hills measured | With passport place |', '|---|---:|---:|---:|---:|---:|---:|');
 for (const [code, s] of Object.entries(r.regions)) {
-  out.push(`| ${code} | ${n(s.spots)} | ${n(s.toilets)} | ${n(s.rays)} | ${n(s.sunsetWater)} | ${n(s.places)} |`);
+  out.push(`| ${code} | ${n(s.spots)} | ${n(s.toilets)} | ${n(s.rays)} | ${n(s.sunsetWater)} | ${n(s.horizons || 0)} | ${n(s.places)} |`);
 }
 const q = r.squares, t = r.seats;
 out.push('', `${n(q.withSpots)} square files (${(r.bytes / 1e6).toFixed(1)} MB before compression), ${n(q.covered)} squares covered.`);
