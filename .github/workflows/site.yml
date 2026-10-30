@@ -38,7 +38,7 @@ jobs:
           node-version: 22
 
       - name: Check the shared core and the app's logic
-        run: node pipeline/test/check-core.js && node test/check-present.js
+        run: node pipeline/test/check-core.js && node test/check-present.js && node test/check-guide.js && node test/check-horizon.js
 
       - name: Fetch the published site
         run: |
