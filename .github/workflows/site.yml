@@ -2,14 +2,17 @@
 # (the app plus the spot files) to the "site" branch, which GitHub Pages serves.
 #
 # - On the 1st and 15th of each month, and when started by hand: fresh OpenStreetMap data, full rebuild.
+#   The 2nd and 16th are a second chance in case the day before failed: a scheduled run does
+#   nothing while the published spot files are less than 3 days old.
 # - On every push to main: the app is redeployed with the spot files already published.
 # Unchanged squares come out byte-identical, so each publish only uploads what changed,
 # and the site branch keeps a single commit instead of growing.
+# If a run fails, nothing is published and the site keeps running its last good version.
 name: Site
 
 on:
   schedule:
-    - cron: '17 2 1,15 * *'
+    - cron: '17 2 1,2,15,16 * *'
   workflow_dispatch:
     inputs:
       rebuild:
@@ -31,14 +34,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 150
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
-
-      - name: Check the shared core and the app's logic
-        run: node pipeline/test/check-core.js && node test/check-present.js && node test/check-guide.js && node test/check-horizon.js
 
       - name: Fetch the published site
         run: |
@@ -49,17 +49,26 @@ jobs:
             echo "No site branch yet: this is the first build."
           fi
 
-      - name: Decide whether to rebuild the spot files
+      - name: Decide what to do
         id: mode
         env:
           EVENT: ${{ github.event_name }}
           REBUILD: ${{ inputs.rebuild }}
         run: |
-          if [ "$EVENT" = schedule ] || [ "$REBUILD" = true ] || [ ! -f previous/data/v1/coverage.json ]; then
+          # How many hours ago the published spot files were built (a very large number if there are none).
+          age=$(node -e 'let h = NaN; try { h = (Date.now() - Date.parse(require(require("path").resolve("previous/data/v1/report.json")).built)) / 3600000 } catch (e) {} console.log(Number.isFinite(h) ? Math.floor(h) : 99999)')
+          if [ "$EVENT" = schedule ] && [ "$age" -lt 72 ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "The spot files were rebuilt $age hours ago, so this scheduled run has nothing to do." | tee -a "$GITHUB_STEP_SUMMARY"
+          elif [ "$EVENT" = schedule ] || [ "$REBUILD" = true ] || [ ! -f previous/data/v1/coverage.json ]; then
             echo "rebuild=true" >> "$GITHUB_OUTPUT"
           else
             echo "rebuild=false" >> "$GITHUB_OUTPUT"
           fi
+
+      - name: Check the shared core and the app's logic
+        if: steps.mode.outputs.skip != 'true'
+        run: node pipeline/test/check-core.js && node test/check-present.js && node test/check-guide.js && node test/check-horizon.js
 
       - name: Install osmium
         if: steps.mode.outputs.rebuild == 'true'
@@ -74,10 +83,11 @@ jobs:
         run: node --max-old-space-size=8192 pipeline/build.js --work work --out site/data --prev previous/data
 
       - name: Keep the published spot files
-        if: steps.mode.outputs.rebuild != 'true'
+        if: steps.mode.outputs.rebuild == 'false'
         run: mkdir -p site && cp -r previous/data site/data
 
       - name: Add the app
+        if: steps.mode.outputs.skip != 'true'
         run: |
           cp -r app/. site/
           cp core/core.js site/core.js
@@ -85,6 +95,8 @@ jobs:
           touch site/.nojekyll
 
       - name: Publish to the site branch
+        id: publish
+        if: steps.mode.outputs.skip != 'true'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -100,3 +112,13 @@ jobs:
         run: |
           node pipeline/summary.js site/data >> "$GITHUB_STEP_SUMMARY"
           node test/check-present.js site/data
+
+      # Says in plain words what a failure means, on the run's page and in the email's annotations.
+      - name: Explain the failure
+        if: failure() && steps.publish.outcome != 'success'
+        env:
+          EVENT: ${{ github.event_name }}
+        run: |
+          note="Nothing was published, so the site keeps running its last good version."
+          if [ "$EVENT" = schedule ]; then note="$note Scheduled builds run on the 1st, 2nd, 15th and 16th, so the next one tries again."; fi
+          echo "::error title=Nothing was published::$note"
