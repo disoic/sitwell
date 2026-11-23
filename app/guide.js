@@ -64,7 +64,7 @@
     if (/in the woods|at the forest edge/.test(w)) out.push('woods');
     if (/in a park|in a garden/.test(w)) out.push('park');
     if (/with a view/.test(w)) out.push('view');
-    if (/\bnear [A-ZÀ-ÖØ-ÞĀ-Ž0-9]/.test(raw)) out.push('landmark');
+    if (/\bnear (the |[A-ZÀ-ÖØ-ÞĀ-Ž0-9])/.test(raw)) out.push('landmark');
     if (kind === 'table' || /picnic table/.test(w)) out.push('picnic');
     return out;
   }

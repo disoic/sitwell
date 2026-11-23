@@ -54,7 +54,7 @@
      One Overpass request per square fetches its seats and everything around them within the same
      margins the pipeline uses; the phone measures them with the same core and keeps the result
      for 14 days, in the same format as a static square. */
-  const LIVE = { version: 1, maxAgeDays: 14, margins: { point: 485, trees: 32, bins: 80, line: 650, area: 300, rays: 2100 } };
+  const LIVE = { version: 2, maxAgeDays: 14, margins: { point: 485, trees: 32, bins: 80, line: 650, area: 300, rays: 2100 } };
   const MIRRORS = ['https://overpass-api.de/api/interpreter', 'https://overpass.private.coffee/api/interpreter', 'https://overpass.kumi.systems/api/interpreter'];
   function expandBox(b, m) {
     const mid = (b[0] + b[2]) / 2, dLat = m / 110574, dLon = m / (111320 * Math.cos(mid * Math.PI / 180));

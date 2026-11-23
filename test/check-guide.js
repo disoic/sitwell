@@ -51,4 +51,14 @@ const h = G.build(many), pebbles = h.pages.filter(p => p.souvenir).length;
 console.log(`  400 summer lakeside pages: ${pebbles} souvenirs (${(pebbles / 400 * 100).toFixed(0)}%)`);
 assert(pebbles > 50 && pebbles < 110, 'about one in five');
 for (const k of G.KINDS) assert(G.svg(k.id, 24).startsWith('<svg'), k.id);
+// Pages near a landmark are found with the new wording and the old one.
+{
+  const G2 = require('../app/guide.js');
+  const has = w => (G2.settingsOf ? G2.settingsOf(w, 'bench') : []).includes('landmark');
+  if (G2.settingsOf) {
+    assert(has('Bench near the Sheep Piece sculpture.') && has('Bench near Henry Moore’s Sheep Piece sculpture.') && has('Bench near Sheep Piece.'));
+    assert(!has('Lakeside bench, with sunsets over the lake.'));
+    console.log('landmark pages found with old and new wording');
+  } else console.log('settingsOf not exported; landmark wording covered by the smoke test');
+}
 console.log('field guide checks passed');

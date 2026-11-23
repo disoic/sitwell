@@ -15,10 +15,13 @@ Find a lovely spot to linger: benches, picnic tables and toilets, described by w
 
 GitHub Pages serves the **`site` branch**, which the workflow writes. Never edit that branch by hand. It holds the app, `core.js`, and the spot files under `data/v1/`.
 
-- **On the 1st and 15th of each month**, and whenever you start it by hand: the workflow downloads Switzerland and Croatia from Geofabrik, reduces them to what Sitwell uses, builds the spot files, and publishes.
+- **On the 1st and 15th of each month**, and whenever you start it by hand: the workflow downloads Switzerland, Croatia and Slovenia from Geofabrik, reduces them to what Sitwell uses, builds the spot files, and publishes.
+- **On the 2nd and 16th**: a second chance. A scheduled run does nothing while the published spot files are less than 3 days old, so these runs rebuild only when the day before failed.
 - **On every push to `main`**: the app is republished together with the spot files already online. Nothing is rebuilt.
 
-Unchanged squares come out byte-identical, so each publish uploads only what changed, and the `site` branch stays a single commit. A build that fails publishes nothing, so the old site stays online.
+Unchanged squares come out byte-identical, so each publish uploads only what changed, and the `site` branch stays a single commit. A build that fails publishes nothing, so the old site stays online. The run's page then says so in plain words, together with what went wrong.
+
+Downloads go through `pipeline/download.sh`, which retries every error for about 3 minutes, a refused connection included. curl's plain `--retry` skips refused connections, and on 15 November 2026 a single refusal from Geofabrik's server stopped a scheduled build.
 
 After each build, the job page shows a summary: spots per country, how many are near water or face open water at sunset, and which squares and seats changed.
 
@@ -63,6 +66,7 @@ node pipeline/build.js --out site/data  # builds the spot files
 
 Each step can also be run on its own:
 - `bash pipeline/reduce.sh any.osm.pbf work/XX.geojsonseq` reduces one extract.
+- `bash pipeline/download.sh URL file "name"` downloads one file patiently; `TRIES` and `PAUSE` (seconds) set how long it keeps trying.
 - `--only CH` builds just one region.
 - `--prev old/data` compares the build with an earlier one.
 
@@ -78,7 +82,9 @@ node pipeline/test/check-core.js
 
 `node test/check-present.js [data dir]` checks the app's logic (sun positions, season wording, the score) and, given built spot files, prints sample summaries and a "best right now" ranking. The workflow runs it after each build, so the job log shows real Swiss and Croatian summaries.
 
-`pipeline/test/compare-old.js` compares the pipeline with the prototype's own core (`old-core.js`, copied unchanged from the prototype) on the same map data. Run it on a small extract listed in `pipeline/test/regions.test.json`. Utrecht, Monaco and Liechtenstein, from public test files on GitHub, all match: the same grouping, the same summaries and the same estimates. The only differences are intended ones, such as the sea now counting as water.
+`pipeline/test/compare-old.js` compares the pipeline with the prototype's own core (`old-core.js`, copied unchanged from the prototype) on the same map data. Run it on a small extract listed in `pipeline/test/regions.test.json`. Utrecht, Monaco and Liechtenstein, from public test files on GitHub, all match: the same grouping, the same summaries and the same estimates. The only differences are intended ones, such as the sea now counting as water, and places of worship that are only a congregation mapped as a point no longer counting as landmarks.
+
+Landmarks are named with their kind in plain English, from the map data: "the Sheep Piece sculpture", "the Schloss Vaduz castle", "the Sultan Ahmet mosque". Where an artwork's artist is mapped, the summary names them too ("Henry Moore’s Sheep Piece sculpture"), unless that makes the phrase too long. A place of worship counts as a landmark only when it's mapped as a building, is historic, or is named like a church, chapel or mosque.
 
 ## Adding a country
 
@@ -87,10 +93,13 @@ Add an entry to `pipeline/regions.json`: its code, its ISO country code, and its
 ## The app
 
 The first version follows the approved sketch:
-- **Main screen:** the map with "Best right now" in a panel; the panel's top line changes with the moment (sunset soon, rain, heat, cold and clear, dark).
-- **Getting around:** Walking or Cycling, switching itself when you ride, plus filters and place search.
+- **Main screen:** the map with a panel of spots, ordered "Best now" or "Nearest" (two tabs at its top; the choice is remembered). The panel's top line changes with the moment (sunset soon, rain, heat, cold and clear, dark).
+- **The panel** has three heights: just its title row so the whole map shows, two spots with a third peeking, and the full list. It follows your finger anywhere on it and settles at the nearest height; a flick goes one further. In the full list, a drag scrolls the list, and pulling down at the top lowers the panel. A tap on the handle steps between two spots and the full list, and on a laptop the panel sits open at the side.
+- **Getting around:** Walking or Cycling, switching itself when you ride, plus place search and filters: Sunset, By water, Shaded (trees close by, a row of trees, or in the woods), Quiet, Picnic and Toilet, with more under "More", including Tucked away.
+- **Tucked away:** a guess from the map (no busy road close; no stop, shop, café, kiosk, playground, bathing spot or landmark within 150 m; not on a promenade; trees or woods around), shown on the card as "looks tucked away", plus a "Tucked away" tag you can give when rating. The spot files hold no footpaths, side streets or buildings, so the guess can't see houses overlooking a bench and mostly finds benches in the woods; your tags are the truth, and once ratings are shared they'll show how well the guess holds up. Your tag turns the card's "looks tucked away" into "tucked away".
+- **Your history and spots:** ratings, tags and seat answers belong to the spot you gave them to, matched by its id. Only when that spot isn't on the map under its id any more (its OpenStreetMap id changed) are they matched by position, within 15 m.
 - **The spot card:** Go, Meet me here and Save.
-- **Arriving at a spot:** after you've stayed within reach of a spot for 10 minutes, Sitwell asks how it is. The time counts even if you close the app and open it again; moving more than 50 m away starts it again. It doesn't ask about toilets, or about a spot you rated in the last 12 hours. GPS can be 20–30 m out, so "Not this spot?" lists the other spots within reach, with their distance and direction. You rate with one tap, then add tags if you like. The "Check in and rate" button on a spot's card works at once, without waiting.
+- **Arriving at a spot:** after you've stayed within reach of a spot for 10 minutes, Sitwell asks how it is, once per stop: after it has asked, or after you've rated a spot yourself, it waits until you've moved more than 50 m. The time counts even if you close the app and open it again; moving more than 50 m away starts it again. It doesn't ask about toilets, or about a spot you rated in the last 12 hours. GPS can be 20–30 m out, so "Not this spot?" lists the other spots within reach, with their distance and direction. You rate with one tap, then add tags if you like. It also asks what the seat is made of (wood, metal, or stone or concrete), as one optional tap. When OpenStreetMap already knows, it just says so ("Wooden seat. Not right?"), and "Not right?" opens the choices, with "OpenStreetMap says wood" above them. Your answer wins over the map's: the card drops the map's material from its sentence and says your seat instead. Each answer is saved with what the map said, so that once ratings are shared, corrections several people agree on can be sent to OpenStreetMap as a note. It asks about the seat rather than the bench, because many benches are wooden slats on a metal frame. The spot's card then says "Wooden seat", and "Best now" uses it: on cold days wooden seats rise a little and metal or stone ones sink, and in full summer sun metal and stone sink. The "Check in and rate" button on a spot's card works at once, without waiting.
 - **Invitation page:** a friend opens it without installing anything.
 - **My spots:** what you saved and rated.
 

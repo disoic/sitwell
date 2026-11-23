@@ -13,6 +13,7 @@
 
   // Thresholds in metres: the prototype's, plus the new ones.
   const R = Object.assign({}, C.RULES, {
+    tuckedFar: 150,     // "looks tucked away": nothing that draws people within this distance
     sea: 40,            // "seaside"
     firepit: 150,       // fire pit nearby
     playground: 60,
@@ -135,7 +136,34 @@
     return near.reduce((a, b) => (b[1] < a[1] ? b : a))[0];
   }
 
+  /* A landmark with its kind: "the Sheep Piece sculpture", "Henry Moore’s Sheep Piece sculpture", "the Schloss Vaduz
+     castle". When the name already says the kind in English ("Malizia Statue") it isn't repeated; when the kind
+     isn't known (spot files from before), it's just the name, as before. */
+  function landmarkPhrase(m, withArtist = true) {
+    const name = (m.landmarkName || '').replace(/,\s*[\d\s.\-–]+$/, '').trim();   // "Jules Massenet, 1842-1912" → "Jules Massenet"
+    const kind = m.landmarkKind || '';
+    if (!kind) return name;
+    const said = name.toLowerCase().includes(kind.split(' ').pop());
+    const named = said ? name : `${name} ${kind}`;
+    // The artist only while the phrase stays readable: "Giorgio de Chirico’s Ettore e Andromaca sculpture" fits,
+    // a long title plus a long name doesn't.
+    const by = withArtist && m.landmarkBy && !name.toLowerCase().includes(m.landmarkBy.toLowerCase())
+      && m.landmarkBy.length + name.length <= 45 ? m.landmarkBy : '';
+    if (by) return `${by}${/s$/i.test(by) ? '’' : '’s'} ${named}`;
+    return /^the\s/i.test(named) ? named : `the ${named}`;
+  }
+
   /* ---------- noise ---------- */
+
+  /* "Looks tucked away": no busy road close, nothing that draws people within 150 m (stops, shops, cafés,
+     kiosks, playgrounds, bathing spots, landmarks), not on a promenade, and trees or woods around for cover.
+     A guess: the spot files hold no footpaths, side streets or buildings, so it can't see houses overlooking
+     a bench or a busy park path. It mostly finds benches in the woods and on the edge of town. */
+  function tuckedAway(m) {
+    const far = k => !(m[k] <= R.tuckedFar);
+    return !noise(m) && far('stop') && far('food') && far('snack') && far('playground') && far('swim') && far('landmark')
+      && !(m.promenade <= R.promenade) && !!(m.inForest || m.trees >= R.shadeTrees || m.treeRow <= R.shadeRadius);
+  }
 
   function noise(m) {
     if (m.roadMajor <= R.motorway) return { label: 'Motorway', d: m.roadMajor };
@@ -183,7 +211,7 @@
       else if (m.pond <= R.pond) tail.push('by a pond');
       else if (m.water <= R.pond) tail.push('by the water');
     }
-    if (m.landmark <= R.landmark && m.landmarkName) tail.push(`near ${m.landmarkName}`);
+    if (m.landmark <= R.landmark && m.landmarkName) tail.push(`near ${landmarkPhrase(m)}`);
     const months = sunsetMonths(s), sunset = months.length ? `sunsets over ${waterWord(m)}${seasonPhrase(months)}` : '';
     if (m.view <= R.view) tail.push(sunset ? `with a view and ${sunset}` : 'with a view');
     else if (sunset) tail.push(`with ${sunset}`);
@@ -199,6 +227,7 @@
     if (t.covered === 'yes' || m.shelter <= R.shelter) c.push('roofed');
     if (!m.inForest && (m.trees >= R.shadeTrees || m.treeRow <= R.shadeRadius)) c.push('likely shaded');
     if (t.lit === 'yes') c.push('lit at night');
+    if (s.kind !== 'toilet' && tuckedAway(m)) c.push('looks tucked away');
 
     if (m.drink <= R.drinkingWater) facts.push({ label: 'Drinking water', d: m.drink });
     if (m.toilet <= R.toilet) facts.push({ label: 'Toilet', d: m.toilet });
@@ -284,6 +313,8 @@
       sunset: sunsetMonths(s).length > 0,
       firepit: m.firepit <= R.firepit,
       swim: m.swim <= R.swim,
+      shaded: m.inForest || m.trees >= R.shadeTrees || m.treeRow <= R.shadeRadius,
+      tucked: tuckedAway(m),
     };
   }
 
@@ -317,6 +348,16 @@
 
   /* How good a spot is right now, for sorting "Best right now".
      ctx: { now, at: { lat, lon }, bike, weather: { temp, precip, low, mid, high } | null, sunset: { at: Date, outlook } | null } */
+  /* What you sit on: 'wood', 'metal', 'stone' (stone or concrete) or 'plastic', from an OpenStreetMap
+     material value. "wood;metal" is usually wooden slats on a metal frame, so wood wins. */
+  const SEAT_MATERIAL = { wood: 'wood', timber: 'wood', metal: 'metal', steel: 'metal', iron: 'metal', cast_iron: 'metal',
+    aluminium: 'metal', stone: 'stone', granite: 'stone', sandstone: 'stone', marble: 'stone', concrete: 'stone', brick: 'stone',
+    plastic: 'plastic' };
+  function seatMaterial(v) {
+    const parts = String(v || '').toLowerCase().split(';').map(x => SEAT_MATERIAL[x.trim()]).filter(Boolean);
+    return parts.includes('wood') ? 'wood' : parts[0] || null;
+  }
+
   function nowValue(s, ctx) {
     const m = s.m, t = s.tags || {};
     let v = s.score ? s.score.value : s.estimate != null ? s.estimate : 3;
@@ -327,6 +368,10 @@
     if (w && w.precip >= 0.2) { v += roofed ? 1.2 : -0.6; if (roofed) reasons.push('roofed'); }
     if (w && w.temp >= 26) { v += shaded ? 0.5 : -0.3; if (shaded) reasons.push('shade'); }
     if (w && w.temp <= 10 && w.precip < 0.2 && Math.max(w.low, w.mid) < 50 && !shaded) { v += 0.3; reasons.push('sun'); }
+    // The seat: wood stays pleasant; metal and stone are icy in the cold and hot in full summer sun.
+    const mat = s.kind === 'toilet' ? null : ctx.materialOf ? ctx.materialOf(s) : seatMaterial(t.material);
+    if (w && w.temp <= 10) { if (mat === 'wood') { v += 0.2; reasons.push('warmseat'); } else if (mat === 'metal' || mat === 'stone') v -= 0.2; }
+    if (w && w.temp >= 26 && !shaded && !roofed) { if (mat === 'metal') v -= 0.4; else if (mat === 'stone') v -= 0.2; }
     if (ctx.sunset && ctx.sunset.at) {
       // Each spot's own sunset: earlier where hills hide the sun.
       const g = s.rays ? sunGone(s, ctx.now) : null, minutes = g ? (g.at - ctx.now) / 60000 : Infinity;
@@ -358,7 +403,7 @@
   }
 
   return {
-    R, SCORE, sunPosition, sunsetBearing, sunGone, waterToward, sunsetMonths, sunsetToday, seasonPhrase, waterWord, noise,
+    R, SCORE, landmarkPhrase, seatMaterial, tuckedAway, sunPosition, sunsetBearing, sunGone, waterToward, sunsetMonths, sunsetToday, seasonPhrase, waterWord, noise,
     describe, estimate, score, band, promising, flags, sunsetOutlook, forecastUrl, forecastAt, nowValue, rankNow, prepare,
   };
 }));

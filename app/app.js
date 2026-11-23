@@ -17,10 +17,10 @@
   const SPEED = { walk: 80, bike: 250 };   // metres per minute
   const GAME = { checkinRadius: 40, accuracySlack: 25, maxAccuracy: 75, rateWindowHours: 24,
     addMaxDistance: 40, addMinGap: 15, addsPerDay: 10, addMaxAccuracy: 30 };
-  const KEYS = { events: 'pause.events.v1', saved: 'sitwell.saved.v1', mode: 'sitwell.mode.v1', located: 'sitwell.located.v1',
+  const KEYS = { sort: 'sitwell.sort.v1', events: 'pause.events.v1', saved: 'sitwell.saved.v1', mode: 'sitwell.mode.v1', located: 'sitwell.located.v1',
     pins: 'sitwell.pinm.v1', install: 'sitwell.install.v1', wishNo: 'sitwell.wishno.v1', dwell: 'sitwell.dwell.v1' };
   const WORDS = { seat: ['Not worth it', 'Meh', 'Okay', 'Nice', 'Lovely'], toilet: ['Avoid', 'Grim', 'Okay', 'Clean', 'Spotless'] };
-  const TAGS = [['view', 'View'], ['quiet', 'Quiet'], ['sunset', 'Sunset'], ['fortwo', 'For two'], ['shade', 'Shade'], ['sun', 'Sunny'], ['picnic', 'Picnics'], ['kids', 'Kids']];
+  const TAGS = [['view', 'View'], ['quiet', 'Quiet'], ['sunset', 'Sunset'], ['fortwo', 'For two'], ['tucked', 'Tucked away'], ['shade', 'Shade'], ['sun', 'Sunny'], ['picnic', 'Picnics'], ['kids', 'Kids']];
   const STYLE_URL = 'https://tiles.openfreemap.org/styles/positron';
   const OVERLAYS = ['spot', 'arrive', 'meet', 'mine', 'invite', 'add', 'page'];
 
@@ -73,20 +73,37 @@
   }
   // Your rating, tags and visits for a spot: matched by its id, a seat's id, or within 15 m of a seat.
   function myInfo(s) {
-    if (s._mine && s._mine.n === events.length) return s._mine;
-    const ids = new Set([s.id].concat(s.members.map(m => m.id)));
-    let rating = null, rt = -1, tags = [], tt = -1, visited = false, lastVisit = 0;
+    if (s._mine && s._mine.n === events.length && s._mine.v === state.spotsV) return s._mine;
+    let rating = null, rt = -1, tags = [], tt = -1, visited = false, lastVisit = 0, material = null, mt = -1;
     for (const e of events) {
-      const mine = (e.spot && ids.has(e.spot)) || (e.id && ids.has(e.id)) ||
-        (e.lat != null && s.members.some(m => C.metres(e.lat, e.lon, m.lat, m.lon) <= C.GROUP_RADIUS));
+      // By id when the spot you rated is on the map; by position (15 m) only when it isn't, e.g. because its
+      // OpenStreetMap id changed. A neighbour whose bench stands within 15 m doesn't get your ratings.
+      const owner = (state.ownerOf && ((e.spot && state.ownerOf.get(e.spot)) || (e.id && state.ownerOf.get(e.id)))) || null;
+      const mine = owner ? owner === s.id : e.lat != null && s.members.some(m => C.metres(e.lat, e.lon, m.lat, m.lon) <= C.GROUP_RADIUS);
       if (!mine) continue;
       const t = e.t || 0;
       if (e.type === 'checkin' || e.type === 'add') { visited = true; lastVisit = Math.max(lastVisit, t); }
       if ((e.type === 'checkin' || e.type === 'rate' || e.type === 'add') && e.rating != null && t >= rt) { rating = normRating(e.rating); rt = t; }
       if (e.type === 'vote' && t >= rt) { rating = e.v === 1 ? 5 : e.v === -1 ? 2 : rating; rt = t; }
       if (e.type === 'tags' && t >= tt) { tags = e.tags || []; tt = t; }
+      if (e.type === 'material' && t >= mt) { material = e.material || null; mt = t; }
     }
-    return (s._mine = { n: events.length, rating, ratedAt: rt, tags, visited, lastVisit });
+    return (s._mine = { n: events.length, v: state.spotsV, rating, ratedAt: rt, tags, visited, lastVisit, material });
+  }
+  // The seat: what OpenStreetMap says, or else what you told Sitwell when you rated it.
+  const SEAT_CHOICES = [['wood', 'Wood'], ['metal', 'Metal'], ['stone', 'Stone or concrete']];
+  const SEAT_WORDS = { wood: 'Wooden seat', metal: 'Metal seat', stone: 'Stone or concrete seat', plastic: 'Plastic seat' };
+  const SEAT_NAMES = { wood: 'wood', metal: 'metal', stone: 'stone or concrete', plastic: 'plastic' };
+  const mappedMaterial = s => P.seatMaterial((s.tags || {}).material);
+  // Your own answer wins: you were there, and OpenStreetMap is sometimes wrong.
+  const materialOf = s => myInfo(s).material || mappedMaterial(s);
+  // When you've corrected the map, its material leaves the sentence ("Wooden bench…" becomes "Bench…")
+  // and your answer goes in the comfort line instead.
+  function textOf(s) {
+    const mine = myInfo(s).material, mapped = mappedMaterial(s);
+    if (!mine || !mapped || mine === mapped) return s.text;
+    if (!s._fixed || s._fixed.k !== mine) s._fixed = { k: mine, text: P.describe(Object.assign({}, s, { tags: Object.assign({}, s.tags, { material: undefined }) })) };
+    return s._fixed.text;
   }
   const wordFor = (r, kind) => (r === 'closed' ? 'Closed or locked' : (kind === 'toilet' ? WORDS.toilet : WORDS.seat)[r - 1] || '');
   const isSaved = s => saved.some(x => x.id === s.id);
@@ -96,7 +113,7 @@
   const state = {
     user: null, center: null, centerIsUser: false, locDenied: false,
     mode: getLS(KEYS.mode, 'walk') === 'bike' ? 'bike' : 'walk',
-    filter: null, moreFilters: false, sort: 'best', shown: 12,
+    filter: null, moreFilters: false, sort: getLS(KEYS.sort, 'best') === 'near' ? 'near' : 'best', shown: 12,
     spots: [], byId: new Map(), ranked: [], promising: new Set(),
     sheet: 'peek', base: 'peek', pushed: false, selected: null, arrive: null, dismissed: new Set(),
     weather: null, weatherKey: '', weatherTime: 0, sunset: null, outlook: null,
@@ -147,13 +164,13 @@
       else if (m.inPark) head = noun + ' in a park';
       else if (m.inGarden) head = noun + ' in a garden';
       else if (m.view <= P.R.view) head = noun + ' with a view';
-      else if (m.landmark <= P.R.landmark && m.landmarkName) head = noun + ' near ' + m.landmarkName;
+      else if (m.landmark <= P.R.landmark && m.landmarkName) head = noun + ' near ' + P.landmarkPhrase(m, false);
     }
     const pl = s.placeInfo;
     const where = pl ? (pl.neighbourhood || pl.district || pl.town || '') : '';
     if (where && !head.includes(where)) return `${head}, ${where}`;
     // No neighbourhood known: a landmark close by tells similar spots apart.
-    if (!where && s.kind !== 'toilet' && m.landmark <= P.R.landmark && m.landmarkName && !head.includes(m.landmarkName)) return `${head} near ${m.landmarkName}`;
+    if (!where && s.kind !== 'toilet' && m.landmark <= P.R.landmark && m.landmarkName && !head.includes(m.landmarkName)) return `${head} near ${P.landmarkPhrase(m, false)}`;
     return head;
   }
   function reasonOf(s, r) {
@@ -174,6 +191,9 @@
     }
     if (why.includes('roofed')) out.push('Roofed');
     if (why.includes('shade')) out.push('Shaded');
+    if (why.includes('warmseat')) out.push('Wooden seat');
+    else if (state.filter === 'shade') out.push(m.inForest ? 'In the woods' : 'Under trees');
+    if (state.filter === 'tucked') out.push(myInfo(s).tags.includes('tucked') ? 'Tucked away' : 'Looks tucked away');
     if (why.includes('sun')) out.push('In the sun');
     if (why.includes('lit')) out.push('Lit at night');
     const mine = myInfo(s);
@@ -259,6 +279,8 @@
     const now = new Date();
     if (navigator.onLine === false) return { icon: '', text: 'You’re offline. Spots you’ve opened before still show.' };
     if (state.filter === 'toilet') return { icon: '', text: 'Nearest toilets first.' };
+    if (state.filter === 'shade') return { icon: icon('tree', 18, '#2F5E43', 2), text: 'Spots under trees or in the woods, cooler on hot days.' };
+    if (state.filter === 'tucked') return { icon: icon('tree', 18, '#2F5E43', 2), text: 'Away from roads, shops and stops, among trees: a guess from the map, plus spots you’ve tagged.' };
     if (state.sort === 'near') return { icon: '', text: 'Nearest spots first.' };
     if (state.filter === 'sunset' && state.sunset) return { icon: icon('sun', 18, '#B35A12', 2), text: `Sunset around ${hhmm(state.sunset)}. These spots face it over open water; each card says when the sun leaves it.` };
     const w = state.weather ? P.forecastAt(state.weather, now) : null, sun = state.sunset;
@@ -291,7 +313,7 @@
     if (token !== loadToken) return;
     state.loading = false;
     state.spots = r.spots.map(ready).concat(pinsNear(state.center, RADIUS[state.mode] + 300));
-    state.byId = new Map(state.spots.map(s => [s.id, s]));
+    indexSpots();
     state.liveLoading = r.pending.length;
     state.liveError = '';
     state.error = !r.spots.length && r.failed.length && !r.pending.length
@@ -321,6 +343,8 @@
       case 'sunset': return P.sunsetToday(s, new Date()) || myInfo(s).tags.includes('sunset');
       case 'water': return s.flags.water;
       case 'quiet': return s.flags.quiet;
+      case 'shade': return s.flags.shaded;
+      case 'tucked': return s.flags.tucked || myInfo(s).tags.includes('tucked');   // the guess, or you said so
       case 'picnic': return s.hasTable || s.flags.firepit;
       case 'green': return s.flags.green;
       case 'firepit': return s.flags.firepit;
@@ -344,7 +368,7 @@
       return;
     }
     const now = new Date(), bike = state.mode === 'bike', u = state.user;
-    const ctx = { now, at, bike, weather: state.weather ? P.forecastAt(state.weather, now) : null, sunset: state.sunset ? { at: state.sunset, outlook: state.outlook } : null };
+    const ctx = { now, at, bike, materialOf, weather: state.weather ? P.forecastAt(state.weather, now) : null, sunset: state.sunset ? { at: state.sunset, outlook: state.outlook } : null };
     const heading = bike && state.centerIsUser && u && u.speed > 2 && Number.isFinite(u.heading) ? u.heading : null;
     state.ranked = P.rankNow(list, ctx).map(r => {
       r.d = C.metres(at.lat, at.lon, r.spot.lat, r.spot.lon);
@@ -471,12 +495,21 @@
     map.easeTo({ center: [c.lon, c.lat], zoom: zoom || map.getZoom(), duration: instant ? 0 : 700, padding: state.pad });
   }
   // The panel's height once it has settled in the current mode (it animates, so measuring would be too early).
-  function sheetTarget() {
-    const H = window.innerHeight, m = state.sheet;
+  function sheetTarget(m = state.sheet) {
+    const H = window.innerHeight;
+    if (m === 'min') return 92;
     if (m === 'peek') return 332;
     if (m === 'list') return H - 100;
     if (m === 'add') return Math.min(H * 0.56, 460);
     return Math.min(H * 0.8, 660);
+  }
+  // Settles the list panel at one of its three heights: 'min' (just the title row, so the whole map shows),
+  // 'peek' (two spots) or 'list' (the full list).
+  function settle(mode) {
+    document.body.classList.remove('dragging');
+    document.body.style.removeProperty('--sheet-h');
+    if (state.sheet !== mode) { state.sheet = mode; state.base = mode; }
+    render();
   }
   function onMoveEnd() {
     if (state.sheet === 'add') updateAddStatus();
@@ -559,11 +592,14 @@
     if (!dwell || C.metres(dwell.lat, dwell.lon, u.lat, u.lon) > 50 || now - dwell.last > 2 * 3600000) dwell = { lat: u.lat, lon: u.lon, since: now };
     dwell.last = now;
     setLS(KEYS.dwell, dwell);
-    if (now - dwell.since < DWELL || OVERLAYS.includes(state.sheet)) return;
+    // One question per stop: once it has asked (or you rated a spot yourself), it waits until you move on.
+    if (now - dwell.since < DWELL || dwell.asked || OVERLAYS.includes(state.sheet)) return;
     const best = near.find(x => !state.dismissed.has(x.s.id));
     if (!best) return;
     const mine = myInfo(best.s);
     if (mine.lastVisit && now - mine.lastVisit < 12 * 3600000) return;
+    dwell.asked = true;
+    setLS(KEYS.dwell, dwell);
     openArrive(best.s.id);
   }
 
@@ -613,8 +649,8 @@
   function renderSoft() { if (!OVERLAYS.includes(state.sheet)) render(); }
 
   function chips() {
-    const base = [['sunset', 'Sunset', icon('sun', 16, '#B35A12', 2)], ['water', 'By water'], ['quiet', 'Quiet'], ['picnic', 'Picnic'], ['toilet', 'Toilet']];
-    const extra = [['green', 'Park or woods'], ['firepit', 'Fire pit'], ['swim', 'Swimming'], ['roofed', 'Roofed'], ['saved', 'Saved'], ['visited', 'Visited']];
+    const base = [['sunset', 'Sunset', icon('sun', 16, '#B35A12', 2)], ['water', 'By water'], ['shade', 'Shaded'], ['quiet', 'Quiet'], ['picnic', 'Picnic'], ['toilet', 'Toilet']];
+    const extra = [['green', 'Park or woods'], ['tucked', 'Tucked away'], ['firepit', 'Fire pit'], ['swim', 'Swimming'], ['roofed', 'Roofed'], ['saved', 'Saved'], ['visited', 'Visited']];
     const list = base.concat(extra.filter(c => state.moreFilters || c[0] === state.filter));
     return list.map(([id, label, ic]) => `<button type="button" class="chip${id === 'toilet' ? ' wc' : ''}" data-act="filter" data-f="${id}" aria-pressed="${state.filter === id}">${ic || ''}${esc(label)}</button>`).join('') +
       `<button type="button" class="chip" data-act="more-filters" aria-expanded="${state.moreFilters}">${state.moreFilters ? 'Fewer' : 'More'}</button>`;
@@ -639,7 +675,8 @@
       <span class="time">${travel}${esc(timeLabel(r))}</span></button>`;
   }
   function listHTML() {
-    const title = state.filter === 'toilet' ? 'Nearest toilets' : state.sort === 'near' ? 'Nearest spots' : 'Best right now';
+    const title = state.filter === 'toilet' ? '<h1>Nearest toilets</h1>'
+      : `<div class="tabs" role="tablist" aria-label="Order"><button type="button" role="tab" data-act="sort" data-v="best" aria-selected="${state.sort !== 'near'}">Best now</button><button type="button" role="tab" data-act="sort" data-v="near" aria-selected="${state.sort === 'near'}">Nearest</button></div>`;
     const welcome = !state.user && !state.locDenied && !state.invite;
     const ctx = contextLine();
     const context = welcome
@@ -650,22 +687,30 @@
     else if (state.error) body = `<p class="note">${esc(state.error)}</p>`;
     else if (!state.ranked.length) body = `<p class="note">${esc(emptyText())}</p>`;
     else {
-      const n = state.sheet === 'list' ? state.shown : 3;
+      const n = state.shown;
       body = '<div class="cards">' + state.ranked.slice(0, n).map(cardHTML).join('') + '</div>';
-      if (state.sheet === 'list') {
-        if (state.ranked.length > n) body += '<button type="button" class="linkish" data-act="more">Show more spots</button>';
-        if (state.filter !== 'toilet') body += `<button type="button" class="linkish" data-act="sort">${state.sort === 'near' ? 'Show the best first' : 'Show the nearest first'}</button>`;
-      }
+      if (state.ranked.length > n) body += '<button type="button" class="linkish" data-act="more">Show more spots</button>';
     }
     if (state.liveLoading && state.ranked.length) body += '<p class="note">Loading more spots from OpenStreetMap…</p>';
     if (state.liveError) body += `<p class="note">${esc(state.liveError)} <button type="button" class="linkish" data-act="retry" style="padding:0;min-height:0">Try again</button></p>`;
-    if (state.sheet === 'list' && canAddHere()) body += '<button type="button" class="linkish" data-act="add-start">No bench mapped where you are? Add it</button>';
-    return `<div class="head"><h1>${title}</h1>
+    if (canAddHere()) body += '<button type="button" class="linkish" data-act="add-start">No bench mapped where you are? Add it</button>';
+    return `<div class="head">${title}
         <div class="seg"><button type="button" data-act="mode" data-v="walk" aria-pressed="${state.mode === 'walk'}">Walking</button><button type="button" data-act="mode" data-v="bike" aria-pressed="${state.mode === 'bike'}">Cycling</button></div></div>
       ${context}${wishRow()}<div class="chips">${chips()}</div>${body}`;
   }
+  // "Backrests, likely shaded." plus the seat you told Sitwell about, when the map doesn't say.
+  function comfortLine(s, t) {
+    const info = myInfo(s), m = info.material, seat = m && m !== mappedMaterial(s) ? SEAT_WORDS[m] : '';
+    let line = t.comfort || '';
+    if (info.tags.includes('tucked')) {
+      line = /looks tucked away/i.test(line) ? line.replace('Looks tucked away', 'Tucked away').replace('looks tucked away', 'tucked away')
+        : line ? line.replace(/\.$/, ', tucked away.') : 'Tucked away.';
+    }
+    if (!seat) return line;
+    return line ? `${seat}, ${lowerFirst(line)}` : `${seat}.`;
+  }
   function spotHTML(s) {
-    const t = s.text, mine = myInfo(s), now = new Date(), here = atSpot(s);
+    const t = textOf(s), mine = myInfo(s), now = new Date(), here = atSpot(s);
     let status = '';
     if (s.pin) status = `<p class="status mine">${icon('check', 16, '#2F5E43', 2.2)}You added it${s._v ? '' : '. Its surroundings are being looked up'}.</p>`;
     else if (mine.rating != null) status = `<p class="status mine">${icon('check', 16, '#2F5E43', 2.2)}You rated it ${esc(wordFor(mine.rating, s.kind))}.</p>`;
@@ -692,7 +737,7 @@
     return `<div class="spot">
       <div class="bar"><button type="button" class="back" data-act="close" aria-label="Back to the list">${icon('back', 22, 'currentColor', 2)}</button></div>
       <div><h2>${esc(titleOf(s))}</h2>${status}</div>
-      <div><p class="sentence">${esc(t.sentence)}</p>${t.comfort ? `<p class="comfort">${esc(t.comfort)}</p>` : ''}${t.note ? `<p class="comfort">${esc(t.note)}</p>` : ''}</div>
+      <div><p class="sentence">${esc(t.sentence)}</p>${comfortLine(s, t) ? `<p class="comfort">${esc(comfortLine(s, t))}</p>` : ''}${t.note ? `<p class="comfort">${esc(t.note)}</p>` : ''}</div>
       ${tonight}${rows}
       <div class="actions">${main}
         <button type="button" class="btn secondary" data-act="meet" data-id="${esc(s.id)}">Meet me here</button>
@@ -719,12 +764,19 @@
         ${otherSpotsHTML(s)}
         <button type="button" class="linkish" data-act="close">Not now</button></div>`;
     }
+    const mapped = mappedMaterial(s), choices = `<div class="tags">${SEAT_CHOICES.map(([id, label]) =>
+      `<button type="button" class="chip" data-act="material" data-v="${id}" aria-pressed="${mine.material === id}">${esc(label)}</button>`).join('')}</div>`;
+    const ask = '<h3 style="margin:18px 0 0;font-size:16px">What’s the seat made of?</h3>';
+    const seat = s.kind === 'toilet' ? ''
+      : !mapped ? ask + choices
+      : a.fixSeat || (mine.material && mine.material !== mapped) ? `${ask}<p class="note" style="margin:4px 0 0">OpenStreetMap says ${esc(SEAT_NAMES[mapped])}.</p>${choices}`
+      : `<p class="note seat-line" style="margin-top:16px">${esc(SEAT_WORDS[mapped])}. <button type="button" class="linkish" data-act="seat-fix" style="padding:0;min-height:0">Not right?</button></p>`;
     const tags = s.kind === 'toilet' ? '' : `<h3 style="margin:18px 0 0;font-size:16px">What’s good here?</h3><div class="tags">${TAGS.map(([id, label]) =>
       `<button type="button" class="chip" data-act="tag" data-tag="${id}" aria-pressed="${mine.tags.includes(id)}">${esc(label)}</button>`).join('')}</div>`;
     return `<div class="ask"><h2>You’re at the ${esc(name)}</h2>
       <p class="saved-line" style="margin-top:14px">${icon('check', 22, '#2F5E43', 2.2)}Saved as ${esc(wordFor(a.rated, s.kind))}. Thanks for checking in.</p>
       ${foundHTML(s)}
-      ${tags}${installHTML()}
+      ${seat}${tags}${installHTML()}
       <div class="actions" style="margin-top:20px"><button type="button" class="btn primary" data-act="close">Done</button><button type="button" class="btn quiet" data-act="change">Change rating</button></div></div>`;
   }
   // GPS can be 20–30 m out, so the nearest spot isn't always yours: offer the others within reach.
@@ -972,6 +1024,7 @@
     setLS(KEYS.saved, saved);
   }
   function saveRating(s, n) {
+    if (dwell) { dwell.asked = true; setLS(KEYS.dwell, dwell); }   // rated during this stop: no further question here
     const now = Date.now(), mine = myInfo(s);
     const base = { t: now, spot: s.id, lat: +s.lat.toFixed(6), lon: +s.lon.toFixed(6), rating: n, where: s.text.sentence, title: titleOf(s), kind: s.kind, place: s.placeInfo || null };
     const recent = mine.visited && now - mine.lastVisit < GAME.rateWindowHours * 3600000;
@@ -982,6 +1035,14 @@
     if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});   // ask the browser to keep your history
     rank();
     drawSpots();
+    render();
+  }
+  function setMaterial(s, v) {
+    const cur = myInfo(s).material;
+    const e = { type: 'material', t: Date.now(), spot: s.id, lat: +s.lat.toFixed(6), lon: +s.lon.toFixed(6), material: cur === v ? null : v };
+    if ((s.tags || {}).material) e.osm = s.tags.material;   // what the map said, so agreed corrections can go to OpenStreetMap later
+    record(e);
+    rank();
     render();
   }
   function toggleTag(s, id) {
@@ -1073,9 +1134,17 @@
       return false;   // stop asking: be gentle with the shared servers
     });
   }
+  // The loaded spots by id, and which spot each seat belongs to, so your history goes to the spot you
+  // rated and not to its neighbour.
+  function indexSpots() {
+    state.byId = new Map(state.spots.map(s => [s.id, s]));
+    state.ownerOf = new Map();
+    for (const s of state.spots) { state.ownerOf.set(s.id, s.id); for (const m of s.members) state.ownerOf.set(m.id, s.id); }
+    state.spotsV = (state.spotsV || 0) + 1;
+  }
   function mergeSquare(sq) {
     state.spots = state.spots.filter(s => s.square !== sq.id || s.pin).concat(sq.spots.map(ready));
-    state.byId = new Map(state.spots.map(s => [s.id, s]));
+    indexSpots();
     rank();
     drawSpots();
     if (state.invite && !state.invite.spot) { state.invite.spot = findSpot(state.invite); if (state.invite.spot) state.selected = state.invite.spot.id; }
@@ -1302,6 +1371,8 @@
   function bindUI() {
     const body = $('#sheet-body');
     body.addEventListener('click', e => {
+      if (Date.now() - (state.dragEnded || 0) < 400) return;
+      if (state.sheet === 'min' && !e.target.closest('[data-act="mode"], [data-act="sort"]')) { settle('peek'); return; }
       const el = e.target.closest('[data-act]');
       if (!el) return;
       const act = el.dataset.act, s = el.dataset.id ? state.byId.get(el.dataset.id) : state.selected ? state.byId.get(state.selected) : null;
@@ -1311,7 +1382,12 @@
         case 'more-filters': state.moreFilters = !state.moreFilters; render(); break;
         case 'open': openSpot(el.dataset.id); break;
         case 'more': state.shown += 20; render(); break;
-        case 'sort': state.sort = state.sort === 'best' ? 'near' : 'best'; rank(); render(); break;
+        case 'sort': {
+          const v = el.dataset.v === 'near' ? 'near' : 'best';
+          if (v !== state.sort) { state.sort = v; setLS(KEYS.sort, v); state.shown = 12; rank(); }
+          if (state.sheet === 'min') settle('peek'); else render();
+          break;
+        }
         case 'locate': startLocation(true); break;
         case 'close': closeOverlay(); break;
         case 'go': if (s) window.open(directionsUrl(s), '_blank', 'noopener'); break;
@@ -1323,6 +1399,8 @@
         case 'rate': if (s) saveRating(s, el.dataset.n === 'closed' ? 'closed' : Number(el.dataset.n)); break;
         case 'change': if (state.arrive) { state.arrive.rated = null; state.arrive.changed = true; render(); } break;
         case 'tag': if (s) toggleTag(s, el.dataset.tag); break;
+        case 'material': if (s) setMaterial(s, el.dataset.v); break;
+        case 'seat-fix': if (state.arrive) { state.arrive.fixSeat = true; render(); } break;
         case 'share': if (s) shareMeet(s, whenFor(el.dataset.when, s)); break;
         case 'share-time': {
           const v = ($('#meet-time') || {}).value;
@@ -1384,23 +1462,77 @@
     });
     window.addEventListener('popstate', () => { state.pushed = false; if (OVERLAYS.includes(state.sheet) && state.sheet !== 'invite') backToBase(); });
 
-    // The handle: tap to open or close the list, or drag it up and down.
-    const handle = $('#handle');
-    let drag = null, suppress = false;
-    handle.addEventListener('pointerdown', e => { drag = { y: e.clientY }; try { handle.setPointerCapture(e.pointerId); } catch (x) { /* fine */ } });
-    handle.addEventListener('pointerup', e => {
-      if (!drag) return;
-      const dy = e.clientY - drag.y;
+    /* The panel follows your finger anywhere on it, not just the handle, and settles at the nearest of its three
+       heights; a flick goes one height further. In the full list, a drag scrolls the list, and pulling down once
+       it's at the top lowers the panel. On a spot card or another overlay, pulling the handle down closes it.
+       The handle also works with a mouse, and a tap on it steps between two spots and the full list. */
+    const sheetEl = $('#sheet'), handle = $('#handle'), BASE = ['min', 'peek', 'list'];
+    const wide = () => !!(window.matchMedia && window.matchMedia('(min-width: 900px)').matches);
+    const heights = () => ({ min: sheetTarget('min'), peek: sheetTarget('peek'), list: sheetTarget('list') });
+    let drag = null;
+    sheetEl.addEventListener('touchstart', e => {
       drag = null;
+      if (e.touches.length !== 1 || wide()) return;
+      const p = e.touches[0];
+      if (OVERLAYS.includes(state.sheet)) { if (e.target === handle) drag = { overlay: true, y0: p.clientY }; return; }
+      if (!BASE.includes(state.sheet)) return;
+      drag = { x0: p.clientX, y0: p.clientY, y: p.clientY, t: Date.now(), v: 0, h0: sheetTarget(), h: null, dir: null,
+        onList: body.contains(e.target) && !e.target.closest('.head') };
+    }, { passive: true });
+    sheetEl.addEventListener('touchmove', e => {
+      if (!drag || drag.overlay) return;
+      const p = e.touches[0], dx = p.clientX - drag.x0, dy = p.clientY - drag.y0;
+      if (!drag.dir) {
+        if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return;
+        drag.dir = Math.abs(dx) > Math.abs(dy) ? 'x'
+          : state.sheet === 'list' && drag.onList && !(body.scrollTop <= 0 && dy > 0) ? 'scroll' : 'y';
+        if (drag.dir === 'y') document.body.classList.add('dragging');
+      }
+      if (drag.dir !== 'y') return;
+      if (e.cancelable) e.preventDefault();
+      const H = heights(), h = Math.max(H.min, Math.min(H.list + 40, drag.h0 - dy)), now = Date.now();
+      document.body.style.setProperty('--sheet-h', h + 'px');
+      drag.v = (p.clientY - drag.y) / Math.max(1, now - drag.t);
+      drag.y = p.clientY; drag.t = now; drag.h = h;
+    }, { passive: false });
+    const endDrag = e => {
+      const d = drag; drag = null;
+      if (!d) return;
+      if (d.overlay) {
+        const y = e && e.changedTouches && e.changedTouches[0] ? e.changedTouches[0].clientY : d.y0;
+        if (y - d.y0 > 40) { state.dragEnded = Date.now(); closeOverlay(); }
+        return;
+      }
+      if (d.dir !== 'y') return;
+      state.dragEnded = Date.now();
+      const H = heights(), h = d.h != null ? d.h : d.h0, order = BASE.map(k => [k, H[k]]);
+      let to;
+      if (d.v < -0.3) to = order.find(([, x]) => x > h + 8) || order[2];                        // flicked up
+      else if (d.v > 0.3) to = order.slice().reverse().find(([, x]) => x < h - 8) || order[0];  // flicked down
+      else to = order.reduce((m, o) => (Math.abs(o[1] - h) < Math.abs(m[1] - h) ? o : m));
+      settle(to[0]);
+    };
+    sheetEl.addEventListener('touchend', endDrag);
+    sheetEl.addEventListener('touchcancel', endDrag);
+    let mouse = null;
+    handle.addEventListener('pointerdown', e => {
+      if (e.pointerType !== 'mouse') return;
+      mouse = { y: e.clientY };
+      try { handle.setPointerCapture(e.pointerId); } catch (x) { /* fine */ }
+    });
+    handle.addEventListener('pointerup', e => {
+      if (!mouse) return;
+      const dy = e.clientY - mouse.y; mouse = null;
       if (Math.abs(dy) < 10) return;
-      suppress = true;
-      if (dy < 0 && state.sheet === 'peek') { state.sheet = 'list'; render(); }
-      else if (dy > 0) { if (OVERLAYS.includes(state.sheet)) closeOverlay(); else if (state.sheet === 'list') { state.sheet = 'peek'; render(); } }
+      state.dragEnded = Date.now();
+      if (OVERLAYS.includes(state.sheet)) { if (dy > 0) closeOverlay(); return; }
+      const i = Math.max(0, BASE.indexOf(state.sheet));
+      settle(BASE[Math.max(0, Math.min(2, i + (dy < 0 ? 1 : -1)))]);
     });
     handle.addEventListener('click', () => {
-      if (suppress) { suppress = false; return; }
+      if (Date.now() - (state.dragEnded || 0) < 400) return;
       if (OVERLAYS.includes(state.sheet)) closeOverlay();
-      else { state.sheet = state.sheet === 'peek' ? 'list' : 'peek'; render(); }
+      else settle(state.sheet === 'peek' ? 'list' : 'peek');
     });
 
     $('#locate').addEventListener('click', () => { state.keepView = false; if (state.user) recenter(); else startLocation(true); });

@@ -127,4 +127,29 @@ const rnd = () => ((seed = (seed * 1103515245 + 12345) % 2147483648) / 214748364
   assert.deepStrictEqual(norm(groups), norm(oldGroups));
   console.log(`grouping matches the prototype: ${groups.length} spots from ${seats.length} seats`);
 }
+// Landmarks: their kind in plain English, the artist of an artwork, and congregations without a church left out.
+{
+  const lm = (t, node = true) => { const r = C.pointRoles(t, node).find(x => x[0] === 'landmark'); return r ? [r[2].lmKind, r[2].lmBy].filter(Boolean).join(' by ') : null; };
+  const cases = [
+    [{ tourism: 'artwork', artwork_type: 'sculpture', name: 'Sheep Piece', artist_name: 'Henry Moore' }, 'sculpture by Henry Moore'],
+    [{ tourism: 'artwork', name: 'Giraffe', artist_name: 'unknown' }, 'artwork'],
+    [{ tourism: 'artwork', artwork_type: 'statue', name: 'Le Cyclop', artist_name: 'Jean Tinguely;Niki de Saint Phalle' }, 'statue'],
+    [{ historic: 'monument', name: 'Jan van Scorel' }, 'monument'],
+    [{ tourism: 'artwork', name: 'Fontaine "Joyeux"' }, 'fountain'],                            // no type, but the name says it
+    [{ historic: 'castle', name: 'Schloss Vaduz' }, 'castle'],
+    [{ historic: 'castle', castle_type: 'palace', name: 'Palais Princier' }, 'palace'],
+    [{ amenity: 'place_of_worship', religion: 'christian', building: 'church', name: 'Grossmünster' }, 'church'],
+    [{ amenity: 'place_of_worship', religion: 'christian', name: 'Mariahilfkapelle' }, 'chapel'],
+    [{ amenity: 'place_of_worship', religion: 'christian', name: 'Pfarrkirche' }, 'church'],
+    [{ amenity: 'place_of_worship', religion: 'christian', name: 'Katedrala Uznesenja' }, 'cathedral'],
+    [{ amenity: 'place_of_worship', religion: 'muslim', building: 'yes', name: 'Sultan Ahmet' }, 'mosque', false],   // a building outline
+    [{ amenity: 'place_of_worship', religion: 'christian', name: 'Lifeword' }, null],          // a congregation, mapped as a point
+    [{ amenity: 'fountain', name: 'Fontaine globe' }, 'fountain'],
+    [{ tourism: 'museum', name: 'Skimuseum' }, 'museum'],
+    [{ tourism: 'attraction', name: 'Opéra de Monaco' }, ''],
+  ];
+  for (const [t, want, node = true] of cases) assert.strictEqual(lm(t, node), want, t.name);
+  assert.strictEqual(lm({ amenity: 'place_of_worship', religion: 'christian', name: 'Lifeword' }, false), 'church', 'mapped as a building, it counts');
+  console.log('landmark kinds ok:', cases.slice(0, 5).map(([t, w]) => `${t.name} = ${w}`).join('; '));
+}
 console.log('all core checks passed');

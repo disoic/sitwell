@@ -9,7 +9,9 @@ const C = require('../../core/core.js');
 const SEAT_KEYS = ['amenity', 'leisure', 'access', 'backrest', 'armrest', 'material', 'covered', 'seats', 'direction', 'lit',
   'fee', 'charge', 'opening_hours', 'wheelchair', 'changing_table'];
 const POINT_KEYS = ['amenity', 'drinking_water', 'man_made', 'shop', 'tourism', 'historic', 'name', 'highway', 'railway',
-  'public_transport', 'tram', 'bus', 'leisure', 'access'];
+  'public_transport', 'tram', 'bus', 'leisure', 'access',
+  // what kind of landmark it is: "the Sheep Piece sculpture", "the Sultan Ahmet mosque"
+  'building', 'religion', 'artwork_type', 'artist_name', 'castle_type'];
 const LINE_KEYS = ['highway', 'footway', 'tunnel', 'railway', 'waterway', 'natural', 'water', 'name']; // name only as present/absent
 const AREA_KEYS = ['landuse', 'amenity', 'leisure', 'natural', 'water', 'access', 'garden:type'];
 const keep = (t, keys) => {

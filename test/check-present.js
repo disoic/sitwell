@@ -43,6 +43,55 @@ console.log('season wording ok');
   console.log('wording: "' + P.describe(woods).sentence + '" / "' + P.describe(town).sentence + '"');
 }
 
+// 3c. Landmarks read with their kind: "the Sheep Piece sculpture", not just "Sheep Piece".
+{
+  const phrase = (landmarkName, landmarkKind, landmarkBy = '', withArtist = true) => P.landmarkPhrase({ landmarkName, landmarkKind, landmarkBy }, withArtist);
+  const cases = [
+    [phrase('Sheep Piece', 'sculpture', 'Henry Moore'), 'Henry Moore’s Sheep Piece sculpture'],
+    [phrase('Sheep Piece', 'sculpture', 'Henry Moore', false), 'the Sheep Piece sculpture'],
+    [phrase('Schloss Vaduz', 'castle'), 'the Schloss Vaduz castle'],
+    [phrase('Jan van Scorel', 'monument'), 'the Jan van Scorel monument'],
+    [phrase('Malizia Statue', 'statue'), 'the Malizia Statue'],
+    [phrase('Skimuseum', 'museum'), 'the Skimuseum'],
+    [phrase('Jules Massenet, 1842-1912', 'bust'), 'the Jules Massenet bust'],
+    [phrase('The Kiss', 'sculpture'), 'The Kiss sculpture'],
+    [phrase('Dancing Legs', 'sculpture', 'Ann Jones'), 'Ann Jones’ Dancing Legs sculpture'],
+    [phrase('Opéra de Monaco', ''), 'Opéra de Monaco'],
+    [phrase('Maryse au miroir ou le temps inalterable', 'sculpture', 'Cyril de la Patellière'), 'the Maryse au miroir ou le temps inalterable sculpture'],
+  ];
+  for (const [got, want] of cases) assert.strictEqual(got, want);
+  const spot = C.unpackSpot({ id: 'node/3', kind: 'bench', lat: 47.355, lon: 8.555, m: { landmark: 40, landmarkName: 'Sheep Piece', landmarkKind: 'sculpture', landmarkBy: 'Henry Moore' } });
+  assert(/near Henry Moore’s Sheep Piece sculpture/.test(P.describe(spot).sentence));
+  console.log('landmark wording: "' + P.describe(spot).sentence + '"');
+}
+
+// 3d. The seat: on a cold day a wooden seat beats metal; in full summer sun metal sinks.
+{
+  const mk = material => { const s = C.unpackSpot({ id: 'node/' + material, kind: 'bench', lat: 47.37, lon: 8.54, tags: { material }, m: {} }); s.estimate = 3; return s; };
+  const cold = { at: { lat: 47.37, lon: 8.54 }, now: new Date('2026-12-01T12:00:00Z'), weather: { temp: 4, precip: 0, low: 80, mid: 80, high: 0 } };
+  const hot = { at: { lat: 47.37, lon: 8.54 }, now: new Date('2026-07-01T12:00:00Z'), weather: { temp: 30, precip: 0, low: 0, mid: 0, high: 0 } };
+  const w = P.nowValue(mk('wood'), cold), m = P.nowValue(mk('metal'), cold), st = P.nowValue(mk('concrete'), cold);
+  assert(w.value - m.value > 0.35 && w.reasons.includes('warmseat') && st.value === m.value);
+  assert(P.nowValue(mk('metal'), hot).value < P.nowValue(mk('wood'), hot).value - 0.35);
+  assert.strictEqual(P.seatMaterial('wood;metal'), 'wood'); assert.strictEqual(P.seatMaterial('granite'), 'stone'); assert.strictEqual(P.seatMaterial('foam'), null);
+  console.log(`seat on a cold day: wood ${w.value.toFixed(1)}, metal ${m.value.toFixed(1)}; in summer sun metal sinks`);
+}
+
+// 3e. "Looks tucked away": quiet, nothing that draws people within 150 m, not on a promenade, among trees.
+{
+  const mm = (m, woods = true) => C.unpackSpot({ id: 'node/8', kind: 'bench', lat: 47.37, lon: 8.54, m: Object.assign(woods ? { inForest: 1 } : {}, m) }).m;
+  assert(P.tuckedAway(mm({})), 'a bench in the woods, far from everything');
+  assert(!P.tuckedAway(mm({ stop: 100 })), 'a bus stop 100 m away');
+  assert(!P.tuckedAway(mm({ food: 120 })), 'a café 120 m away');
+  assert(!P.tuckedAway(mm({ promenade: 5 })), 'on a promenade');
+  assert(!P.tuckedAway(mm({ roadSecondary: 20 })), 'by a busy road');
+  assert(!P.tuckedAway(mm({}, false)), 'nothing around for cover');
+  assert(P.tuckedAway(mm({ trees: 3 }, false)), 'trees close by count as cover');
+  const s = C.unpackSpot({ id: 'node/9', kind: 'bench', lat: 47.37, lon: 8.54, m: { inForest: 1 } });
+  assert(/looks tucked away/i.test(P.describe(s).comfort));
+  console.log('tucked away: "' + P.describe(s).sentence + ' ' + P.describe(s).comfort + '"');
+}
+
 // 4. Real spots from the built files, when there are any (the workflow runs this after each build).
 const dir = path.join(process.argv[2] || 'site/data', 'v1', 's');
 if (!fs.existsSync(dir)) { console.log('no spot files to sample; presentation checks passed'); process.exit(0); }

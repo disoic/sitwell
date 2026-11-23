@@ -99,7 +99,25 @@ async function openApp(hash = '', start = { lat: 43.725, lon: 7.4165 }, seed = [
   const click = async el => { assert(el, 'nothing to click'); el.click(); await sleep(120); };
   const sheet = () => w.document.body.dataset.sheet;
   const text = s => ($(s) || {}).textContent || '';
-  return { dom, w, $, $$, click, move, sheet, text, errors, shared };
+  // A finger dragging from an element: dy < 0 is up. Moves in steps, like a real swipe.
+  const touch = (el, type, x, y) => {
+    const ev = new w.Event(type, { bubbles: true, cancelable: true });
+    Object.defineProperty(ev, type === 'touchend' ? 'changedTouches' : 'touches', { value: [{ clientX: x, clientY: y, target: el }] });
+    if (type === 'touchend') Object.defineProperty(ev, 'touches', { value: [] });
+    el.dispatchEvent(ev);
+    return ev;
+  };
+  const swipe = async (el, dy, dx = 0) => {
+    assert(el, 'nothing to swipe');
+    const x0 = 150, y0 = 600;
+    touch(el, 'touchstart', x0, y0);
+    let prevented = false;
+    for (let k = 1; k <= 6; k++) prevented = touch(el, 'touchmove', x0 + dx * k / 6, y0 + dy * k / 6).defaultPrevented || prevented;
+    touch(el, 'touchend', x0 + dx, y0 + dy);
+    await sleep(450);   // taps right after a drag are ignored for 400 ms
+    return prevented;
+  };
+  return { dom, w, $, $$, click, move, sheet, text, swipe, errors, shared };
 }
 
 (async () => {
@@ -114,9 +132,9 @@ async function openApp(hash = '', start = { lat: 43.725, lon: 7.4165 }, seed = [
   const a = await openApp('?dwell=0.02', undefined, seed);
   console.log('Main screen');
   assert.strictEqual(a.sheet(), 'peek');
-  const cards = a.$$('#sheet-body .card');
-  assert.strictEqual(cards.length, 3, 'three cards in the panel');
-  log('title:', a.text('#sheet-body h1'), '| context:', a.text('#sheet-body .context'));
+  const cards = a.$$('#sheet-body .card').slice(0, 3);
+  assert(a.$$('#sheet-body .card').length >= 3, 'at least three cards in the panel');
+  log('tabs:', a.$$('#sheet-body .tabs button').map(b => b.textContent + (b.getAttribute('aria-selected') === 'true' ? ' (chosen)' : '')).join(' | '), '| context:', a.text('#sheet-body .context'));
   for (const c of cards) log('card:', c.querySelector('.t').textContent, '|', c.querySelector('.r').textContent, '|', c.querySelector('.time').textContent.trim());
   const feats = a.w.__map.getSource('spots').data.features;
   log(`map: ${feats.length} spots drawn, ${feats.filter(f => f.properties.promising).length} with the gold ring, ${feats.filter(f => f.properties.lovely).length} with a heart (the prototype's rating)`);
@@ -132,11 +150,43 @@ async function openApp(hash = '', start = { lat: 43.725, lon: 7.4165 }, seed = [
   await a.click(a.$('[data-act="filter"][data-f="toilet"]'));
   log('Toilet filter:', a.text('#sheet-body h1'), '|', a.$$('#sheet-body .card .t').slice(0, 2).map(e => e.textContent).join(' / '));
   await a.click(a.$('[data-act="filter"][data-f="toilet"]'));
+  // Shaded: spots under trees or in the woods.
+  await a.click(a.$('[data-act="filter"][data-f="shade"]'));
+  log('Shaded filter:', a.$$('#sheet-body .card').length, 'cards;', a.$$('#sheet-body .card .r').slice(0, 3).map(e => e.textContent).join(' / ') || a.text('#sheet-body .note'));
+  assert(a.$$('#sheet-body .card .r').every(e => /Under trees|In the woods|Shaded/.test(e.textContent)), 'every shaded card says why');
+  await a.click(a.$('[data-act="filter"][data-f="shade"]'));
   await a.click(a.$('#handle'));
   assert.strictEqual(a.sheet(), 'list');
   log('list:', a.$$('#sheet-body .card').length, 'cards; then', a.text('#sheet-body .linkish'));
   await a.click(a.$('#handle'));
   assert.strictEqual(a.sheet(), 'peek');
+
+  // The panel follows a finger anywhere on it, not just the handle.
+  console.log('Dragging the panel');
+  assert(await a.swipe(a.$('#sheet-body .card'), -250), 'the drag is the panel’s, not a scroll');
+  assert.strictEqual(a.sheet(), 'list', 'swiping up on a card opens the full list');
+  a.$('#sheet-body').scrollTop = 200;
+  assert(!(await a.swipe(a.$('#sheet-body .card'), 150)), 'in the full list, a drag scrolls the list');
+  assert.strictEqual(a.sheet(), 'list');
+  a.$('#sheet-body').scrollTop = 0;
+  await a.swipe(a.$('#sheet-body .card'), 200);
+  assert.strictEqual(a.sheet(), 'peek', 'pulling down at the top of the list lowers the panel');
+  await a.swipe(a.$('#sheet-body .context'), 180);
+  assert.strictEqual(a.sheet(), 'min', 'swiping down again leaves just the title row');
+  log('heights: list, peek, then just the title row so the whole map shows');
+  assert(!(await a.swipe(a.$('#sheet-body .chips'), 0, -120)), 'sideways on the filters scrolls them');
+  assert.strictEqual(a.sheet(), 'min');
+  await a.click(a.$('#sheet-body .context'));
+  assert.strictEqual(a.sheet(), 'peek', 'a tap on the small panel opens it');
+
+  // Best now | Nearest
+  await a.click(a.$('[data-act="sort"][data-v="near"]'));
+  const dists = a.$$('#sheet-body .card .time').slice(0, 4).map(e => e.textContent.trim());
+  log('Nearest:', a.text('#sheet-body .context'), '|', dists.join(', '));
+  assert.strictEqual(a.$('[data-act="sort"][data-v="near"]').getAttribute('aria-selected'), 'true');
+  assert.strictEqual(a.w.localStorage.getItem('sitwell.sort.v1'), '"near"', 'the choice is remembered');
+  await a.click(a.$('[data-act="sort"][data-v="best"]'));
+  assert.strictEqual(a.$('[data-act="sort"][data-v="best"]').getAttribute('aria-selected'), 'true');
 
   // 3. The spot card, saving, meet me here.
   await a.click(a.$('#sheet-body .card'));
@@ -173,16 +223,65 @@ async function openApp(hash = '', start = { lat: 43.725, lon: 7.4165 }, seed = [
   log(a.text('#sheet-body h2'), '|', a.text('#sheet-body .sub'), '|', a.$$('#sheet-body .star-btn .w').map(e => e.textContent).join(', '));
   await a.click(a.$('[data-act="rate"][data-n="5"]'));
   log(a.text('#sheet-body .saved-line'), '|', a.text('#sheet-body .found').trim() || '(no souvenir on this page)');
+  const wood = a.$('[data-act="material"][data-v="wood"]');
+  if (wood) {
+    log('asked:', a.$$('#sheet-body h3').map(e => e.textContent).join(' / '), '|', a.$$('[data-act="material"]').map(e => e.textContent).join(', '));
+    await a.click(wood);
+    assert.strictEqual(a.$('[data-act="material"][data-v="wood"]').getAttribute('aria-pressed'), 'true', 'the answer shows chosen');
+  } else log('the seat material is already mapped, so it isn’t asked');
   await a.click(a.$('[data-act="tag"][data-tag="sunset"]'));
   await a.click(a.$('[data-act="tag"][data-tag="fortwo"]'));
+  await a.click(a.$('[data-act="tag"][data-tag="tucked"]'));
   const evs = JSON.parse(a.w.localStorage.getItem('pause.events.v1'));
   const mine = evs.filter(e => e.spot === target.id);
   log('saved events:', mine.map(e => `${e.type}${e.rating ? ' ' + e.rating : ''}${e.tags ? ' [' + e.tags.join(',') + ']' : ''}${e.place ? ' place:' + (e.place.town || '-') : ''}`).join('; '));
   assert(mine.some(e => e.type === 'checkin' && e.rating === 5 && e.first), 'a first check-in in the prototype format');
   assert(mine.some(e => e.type === 'tags' && e.tags.includes('fortwo')));
+  if (wood) assert(mine.some(e => e.type === 'material' && e.material === 'wood'), 'the seat is saved with your history');
   await a.click(a.$('[data-act="close"]'));
   await a.move(target.lat + 0.00001, target.lon);
   assert.notStrictEqual(a.sheet(), 'arrive', 'not asked again right away');
+  // The map says wood; you were there and it's metal.
+  const woody = monaco.find(r => (r.tags || {}).material === 'wood' && r.id !== target.id && r.id !== old.id && C.metres(r.lat, r.lon, target.lat, target.lon) > 80);
+  if (woody) {
+    await a.move(woody.lat, woody.lon); await sleep(1400); await a.move(woody.lat, woody.lon);
+    assert.strictEqual(a.sheet(), 'arrive');
+    const pickW = a.$(`[data-act="arrive-other"][data-id="${woody.id}"]`);
+    if (pickW) await a.click(pickW);
+    await a.click(a.$('[data-act="rate"][data-n="4"]'));
+    log('seat line:', a.text('#sheet-body .seat-line'));
+    assert(/^Wooden seat\. Not right\?$/.test(a.text('#sheet-body .seat-line').trim()), 'the seat shows, with Not right?');
+    await a.click(a.$('[data-act="seat-fix"]'));
+    await a.click(a.$('[data-act="material"][data-v="metal"]'));
+    const fix = JSON.parse(a.w.localStorage.getItem('pause.events.v1')).filter(e => e.type === 'material' && e.spot === woody.id).pop();
+    assert(fix && fix.material === 'metal' && fix.osm === 'wood', 'the correction is saved with what the map said');
+    log('corrected:', a.$$('#sheet-body .note').map(e => e.textContent).find(t => /says/.test(t)), '| saved', JSON.stringify({ material: fix.material, osm: fix.osm }));
+    await a.click(a.$('[data-act="close"]'));
+    await a.click(a.$('[data-act="sort"][data-v="near"]'));
+    const card = a.$(`#sheet-body .card[data-id="${woody.id}"]`);
+    assert(card, 'the bench is in the nearest list');
+    await a.click(card);
+    log('its card after the correction:', a.text('#sheet-body .sentence'), '|', a.text('#sheet-body .comfort'));
+    assert(!/wooden/i.test(a.text('#sheet-body .sentence')) && /Metal seat/.test(a.text('#sheet-body .comfort')), 'the card follows your correction');
+    await a.click(a.$('[data-act="close"]'));
+    await a.click(a.$('[data-act="sort"][data-v="best"]'));
+  }
+  // Tucked away: the map's guess plus the spots you tagged (nothing in Monaco looks tucked away by itself).
+  await a.click(a.$('[data-act="more-filters"]'));
+  await a.click(a.$('[data-act="filter"][data-f="tucked"]'));
+  log('Tucked away filter:', a.text('#sheet-body .context'), '|', a.$$('#sheet-body .card').map(c => c.querySelector('.r') ? c.querySelector('.r').textContent : '').join(' / '));
+  assert(a.$(`#sheet-body .card[data-id="${target.id}"]`), 'the spot you tagged is in it');
+  assert.strictEqual(a.$$('#sheet-body .card').length, 1, 'and not its neighbour');
+  await a.click(a.$('[data-act="filter"][data-f="tucked"]'));
+  await a.click(a.$('[data-act="more-filters"]'));
+  const its = a.$(`#sheet-body .card[data-id="${target.id}"]`);
+  if (wood && its) {
+    await a.click(its);
+    log('its card:', a.text('#sheet-body .comfort'));
+    assert(/Wooden seat/.test(a.text('#sheet-body .comfort')), 'the card says what the seat is made of');
+    assert(/tucked away/.test(a.text('#sheet-body .comfort')), 'and that you found it tucked away');
+    await a.click(a.$('[data-act="close"]'));
+  }
 
   // 5. My spots.
   await a.click(a.$('#mine'));

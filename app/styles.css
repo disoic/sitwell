@@ -18,8 +18,10 @@
   --sans: 'IBM Plex Sans', -apple-system, 'Segoe UI', Roboto, sans-serif;
   --shadow: 0 2px 10px rgba(35, 33, 29, 0.12);
   --peek: 332px;
+  --min: 92px;   /* just the title row, so the whole map shows */
   color-scheme: light;
 }
+body[data-sheet="min"] { --sheet-h: calc(var(--min) + env(safe-area-inset-bottom, 0px)); }
 body[data-sheet="peek"] { --sheet-h: calc(var(--peek) + env(safe-area-inset-bottom, 0px)); }
 body[data-sheet="list"] { --sheet-h: calc(100vh - 100px); --sheet-h: calc(100dvh - 100px - env(safe-area-inset-top, 0px)); }
 body[data-sheet="add"] { --sheet-h: min(56vh, 460px); --sheet-h: min(56dvh, 460px); }
@@ -28,7 +30,7 @@ body[data-sheet="spot"], body[data-sheet="arrive"], body[data-sheet="meet"], bod
 }
 
 * { box-sizing: border-box; }
-html, body { height: 100%; margin: 0; }
+html, body { height: 100%; margin: 0; overscroll-behavior-y: none; }
 body { font-family: var(--sans); color: var(--ink); background: var(--land); overflow: hidden; -webkit-tap-highlight-color: transparent; }
 button, input { font: inherit; color: inherit; }
 button { cursor: pointer; }
@@ -60,16 +62,22 @@ svg { flex: none; }
 .handle { flex: none; display: block; width: 100%; height: 24px; padding: 0; border: 0; background: none; touch-action: none; }
 .handle::before { content: ''; display: block; width: 36px; height: 4px; border-radius: 2px; background: #D9D3C7; margin: 8px auto 0; }
 #sheet-body { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 0 20px 18px; }
-body[data-sheet="peek"] #sheet-body { overflow: hidden; }
+body[data-sheet="peek"] #sheet-body, body[data-sheet="min"] #sheet-body { overflow: hidden; }
+/* While a finger drags the panel, it and everything resting on it follow without easing. */
+body.dragging .sheet, body.dragging .locate, body.dragging .toast, body.dragging .maplibregl-ctrl-bottom-left { transition: none; }
 
-.head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 12px; }
+/* Best now | Nearest: two headings, the chosen one dark and underlined. */
+.tabs { display: flex; gap: 14px; min-width: 0; }
+.tabs button { min-height: 44px; padding: 0; border: 0; background: none; font-family: var(--serif); font-size: 20px; font-weight: 500; line-height: 1.2; color: #9C958A; white-space: nowrap; }
+.tabs button[aria-selected="true"] { color: var(--ink); text-decoration: underline; text-decoration-thickness: 2px; text-underline-offset: 7px; }
 .head h1, .head h2 { margin: 0; font-family: var(--serif); font-weight: 500; font-size: 23px; line-height: 1.2; }
 .seg { flex: none; display: flex; border-radius: 22px; background: #F1EEE8; }
-.seg button { height: 44px; padding: 0 16px; border: 0; border-radius: 22px; background: transparent; font-size: 14px; font-weight: 500; }
+.seg button { height: 44px; padding: 0 13px; border: 0; border-radius: 22px; background: transparent; font-size: 14px; font-weight: 500; }
 .seg button[aria-pressed="true"] { background: var(--green); color: #FFFFFF; }
 .context { margin: 10px 0 0; display: flex; gap: 8px; align-items: flex-start; font-size: 14px; line-height: 1.4; color: var(--ink-2); min-height: 40px; }
 .context svg { margin-top: 1px; }
-.chips { display: flex; gap: 8px; overflow-x: auto; margin: 10px -20px 0; padding: 0 20px; scrollbar-width: none; }
+.chips { display: flex; gap: 8px; overflow-x: auto; touch-action: pan-x; margin: 10px -20px 0; padding: 0 20px; scrollbar-width: none; }
 .chips::-webkit-scrollbar { display: none; }
 .chip { flex: none; height: 44px; padding: 0 16px; border-radius: 22px; border: 1px solid #DDD7CC; background: #FFFFFF; font-size: 14px; display: flex; align-items: center; gap: 6px; }
 .chip[aria-pressed="true"] { border: 1.5px solid var(--green); background: var(--green-soft); color: var(--green-ink); font-weight: 600; }
@@ -180,6 +188,13 @@ body[data-sheet="peek"] #sheet-body { overflow: hidden; }
 
 .toast { position: fixed; left: 50%; bottom: calc(var(--sheet-h) + 16px); transform: translateX(-50%); max-width: calc(100% - 32px); padding: 10px 16px; border-radius: 20px; background: var(--ink); color: #FFFFFF; font-size: 14px; z-index: 30; opacity: 0; pointer-events: none; transition: opacity 0.2s ease; }
 .toast.on { opacity: 1; }
+
+/* Narrow phones (under 380 px): the tabs and the walking/cycling toggle still share one row (measured: 337 px). */
+@media (max-width: 379px) {
+  .tabs { gap: 12px; }
+  .tabs button { font-size: 18px; }
+  .seg button { padding: 0 9px; font-size: 13px; }
+}
 
 /* On a laptop the panel sits at the side, always open. */
 @media (min-width: 900px) {

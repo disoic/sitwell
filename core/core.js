@@ -343,6 +343,55 @@
     if (/^(wastewater|basin|fish_pass|stream|ditch|moat)$/.test(w)) return null;
     return 'pond';
   }
+  /* What kind of landmark it is, in plain English, so a name that means nothing to a visitor ("Sheep Piece",
+     "Jan van Scorel", "Pieterskerk") can read as "the Sheep Piece sculpture". */
+  const ART_KINDS = { sculpture: 'sculpture', statue: 'statue', bust: 'bust', mural: 'mural', graffiti: 'mural', painting: 'painting',
+    installation: 'installation', relief: 'relief', mosaic: 'mosaic', fountain: 'fountain', stone: 'stone' };
+  const ART_NAME_WORDS = [
+    [/fontaine|fontana|brunnen|fountain|fontein|zdenac|vodnjak|česma|cesma/i, 'fountain'],
+    [/\bbuste\b|büste|\bbusto\b|\bbista\b|\bbust\b/i, 'bust'],
+    [/statue|statua|standbild|\bkip\b|\bsocha\b/i, 'statue'],
+    [/fresque|fresco|freska|wandbild|\bmural\b/i, 'mural'],
+  ];
+  const HISTORIC_KINDS = { ruins: 'ruins', monument: 'monument', memorial: 'memorial', fort: 'fort', tower: 'tower', city_gate: 'city gate',
+    manor: 'manor house', church: 'church', chapel: 'chapel', monastery: 'monastery', palace: 'palace', citywalls: 'city wall',
+    archaeological_site: 'archaeological site', wayside_cross: 'wayside cross', wayside_shrine: 'wayside shrine' };
+  const CASTLE_KINDS = { palace: 'palace', manor: 'manor house', fortress: 'fortress', stately: 'stately home' };
+  const WORSHIP_BUILDINGS = { church: 'church', chapel: 'chapel', cathedral: 'cathedral', basilica: 'basilica', mosque: 'mosque',
+    synagogue: 'synagogue', temple: 'temple', shrine: 'shrine', monastery: 'monastery' };
+  // Words that say chapel, church, mosque… in the names used across Europe; the more specific ones first.
+  const WORSHIP_WORDS = [
+    [/kapelle|chapel|chapelle|cappella|kapela|kapel\b|kapell/i, 'chapel'],
+    [/kathedrale|cathedral|cathédrale|cattedrale|katedrala|\bduomo\b|\bdom\b/i, 'cathedral'],
+    [/basilika|basilica|basilique|bazilika/i, 'basilica'],
+    [/kloster|klooster|samostan|abbey|abtei|abbaye|abbazia|opatija|monastery/i, 'monastery'],
+    [/moschee|mosque|mosquée|džamija|dzamija|mošeja|moskee/i, 'mosque'],
+    [/synagog|sinagog/i, 'synagogue'],
+    [/kirche|kirchlein|church|église|eglise|chiesa|crkva|cerkev|kerk|münster|munster|minster/i, 'church'],
+  ];
+  const RELIGION_KINDS = { christian: 'church', muslim: 'mosque', jewish: 'synagogue', buddhist: 'temple', hindu: 'temple', sikh: 'temple' };
+  function worshipKind(t) {
+    for (const [re, k] of WORSHIP_WORDS) if (re.test(t.name)) return k;
+    return WORSHIP_BUILDINGS[t.building] || RELIGION_KINDS[t.religion] || 'place of worship';
+  }
+  // A place of worship counts only when there is something to see: mapped as a building, historic, or named
+  // like a church. A congregation that meets in an ordinary building ("Lifeword") isn't a landmark.
+  const worshipVisible = (t, isNode) => !isNode || !!t.historic || !!WORSHIP_BUILDINGS[t.building] || WORSHIP_WORDS.some(([re]) => re.test(t.name));
+  function landmarkKind(t) {
+    if (t.tourism === 'artwork') return ART_KINDS[t.artwork_type] || (ART_NAME_WORDS.find(([re]) => re.test(t.name)) || [])[1] || 'artwork';
+    if (t.amenity === 'place_of_worship') return worshipKind(t);
+    if (t.historic === 'castle') return CASTLE_KINDS[t.castle_type] || 'castle';
+    if (HISTORIC_KINDS[t.historic]) return HISTORIC_KINDS[t.historic];
+    if (t.amenity === 'fountain') return 'fountain';
+    if (t.tourism === 'museum') return 'museum';
+    return '';   // a sight we can't name the kind of: the app says just its name
+  }
+  // The artist of an artwork, when the map names exactly one.
+  function landmarkBy(t) {
+    const a = t.tourism === 'artwork' ? String(t.artist_name || '').trim() : '';
+    return !a || a.length > 40 || /[;,/&]|\band\b|unknown|unbekannt|inconnu|anonym|sconosciut|nepoznat/i.test(a) ? '' : a;
+  }
+
   // What a point of interest counts as; one place can count as several things.
   function pointRoles(t, isNode) {
     if (isClosed(t)) return [];
@@ -353,8 +402,8 @@
     if (t.amenity === 'bicycle_parking') r.push(['bike']);
     if (t.tourism === 'viewpoint') r.push(['view']);
     if (t.amenity === 'shelter') r.push(['shelter']);
-    if (t.name && (t.historic || t.amenity === 'place_of_worship' || /^(attraction|museum|artwork)$/.test(t.tourism || '')
-      || (t.amenity === 'fountain' && t.drinking_water !== 'yes'))) r.push(['landmark', t.name]);
+    if (t.name && (t.historic || (t.amenity === 'place_of_worship' && worshipVisible(t, isNode)) || /^(attraction|museum|artwork)$/.test(t.tourism || '')
+      || (t.amenity === 'fountain' && t.drinking_water !== 'yes'))) r.push(['landmark', t.name, { lmKind: landmarkKind(t), lmBy: landmarkBy(t) }]);
     if (isNode && (t.highway === 'bus_stop' || t.railway === 'tram_stop' || t.public_transport === 'platform')) r.push(['stop', stopLabel(t)]);
     if (t.leisure === 'firepit' || t.amenity === 'bbq') r.push(['firepit']);
     if (t.leisure === 'playground') r.push(['playground']);
@@ -421,7 +470,7 @@
     const water = rayWin ? { seg: new SegIndex(50), shapes: [] } : null;
     const D = { proj, center, P, L, A, trees: makeGrid(20), bins: makeGrid(20), water };
 
-    const addPoint = (kind, x, y, key, label) => P[kind].push({ x, y, key, label });
+    const addPoint = (kind, x, y, key, label, extra) => P[kind].push(Object.assign({ x, y, key, label }, extra));
     for (const el of input.seats || []) {
       if (seatKind(el.tags) === 'toilet' && !isClosed(el.tags)) addPoint('toilet', (el.lon - lon0) * kx, (el.lat - lat0) * ky, el.id);
     }
@@ -429,7 +478,7 @@
       const roles = pointRoles(el.tags || {}, el.node !== false);
       if (!roles.length) continue;
       const x = (el.lon - lon0) * kx, y = (el.lat - lat0) * ky;
-      for (const [kind, label] of roles) addPoint(kind, x, y, el.id, label);
+      for (const [kind, label, extra] of roles) addPoint(kind, x, y, el.id, label, extra);
     }
     const addFlat = (g, a) => { if (a) for (let k = 0; k < a.length; k += 2) gridAdd(g, (a[k + 1] - lon0) * kx, (a[k] - lat0) * ky); };
     addFlat(D.trees, input.trees);
@@ -506,6 +555,8 @@
     const lm = near(P.landmark);
     m.landmark = lm.d;
     m.landmarkName = lm.item ? lm.item.label : '';
+    m.landmarkKind = lm.item && lm.item.lmKind || '';
+    m.landmarkBy = lm.item && lm.item.lmBy || '';
     m.trees = gridScan(D.trees, x, y, RULES.shadeRadius).count;
     m.treeRow = line(L.treerow);
     m.shelter = near(P.shelter).d;
@@ -547,7 +598,8 @@
     }
     const by = k => list.reduce((a, b) => (b[k] < a[k] ? b : a));
     m.stopLabel = by('stop').stopLabel;
-    m.landmarkName = by('landmark').landmarkName;
+    const lm = by('landmark');
+    m.landmarkName = lm.landmarkName; m.landmarkKind = lm.landmarkKind; m.landmarkBy = lm.landmarkBy;
     m.foodLabel = by('food').foodLabel;
     m.snackLabel = by('snack').snackLabel;
     const wet = list.reduce((a, b) => (Math.min(b.lake, b.river, b.sea) < Math.min(a.lake, a.river, a.sea) ? b : a));
@@ -778,7 +830,8 @@
     'shelter', 'road', 'roadMajor', 'roadPrimary', 'roadSecondary', 'roadTertiary', 'rail', 'tram', 'stop', 'drink', 'toilet', 'food',
     'bin', 'bike', 'firepit', 'playground', 'swim', 'snack'];
   const BOOLS = ['inPark', 'inGarden', 'inCemetery', 'inForest'];
-  const LABELS = { landmarkName: ['landmark', ''], stopLabel: ['stop', 'Stop'], foodLabel: ['food', 'Shop'], snackLabel: ['snack', ''] };
+  const LABELS = { landmarkName: ['landmark', ''], landmarkKind: ['landmark', ''], landmarkBy: ['landmark', ''],
+    stopLabel: ['stop', 'Stop'], foodLabel: ['food', 'Shop'], snackLabel: ['snack', ''] };
   const r6 = v => Math.round(v * 1e6) / 1e6;
 
   function packMeasures(m) {
@@ -987,7 +1040,7 @@
     FORMAT, RULES, LIMITS, GROUP_RADIUS, SEARCH_RADIUS, GRID, RAYS, RAY_BEARINGS, HORIZON, MATERIAL, FOOD_LABEL, SNACK_LABEL, PROMISING_FROM,
     squareOf, squareBox, squareCenter, blockOf, slotInBlock, squaresForCircle,
     makeProj, metres, segDist, bearingTo, SegIndex, Shape, makeGrid, gridAdd, gridScan, nearestPoint,
-    isClosed, seatKind, stopLabel, waterKind, pointRoles, lineRole, areaRole, normDirection,
+    isClosed, seatKind, stopLabel, waterKind, pointRoles, landmarkKind, landmarkBy, lineRole, areaRole, normDirection,
     buildContext, measure, combineMeasures, waterRuns, groupTags, groupSeats, makeSpot, makeToiletSpot, analyseArea, finishSpot,
     packMeasures, unpackMeasures, packSpot, unpackSpot,
     describe, estimateOf, sunsetAt, sunsetWater, flagsOf, compass, fmtDist,
